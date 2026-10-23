@@ -6,6 +6,9 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 
 namespace ffmpeg {
 
@@ -65,6 +68,20 @@ double probePacketDuration(const QString &ffprobe, const QString &path, int stre
 }
 
 QString toolPath(const QString &tool) {
+#ifdef Q_OS_MACOS
+    const QString bundled = QDir(QCoreApplication::applicationDirPath()).filePath("../Helpers/" + tool);
+    if (QFileInfo(bundled).isExecutable())
+        return bundled;
+    const QString fromPath = QStandardPaths::findExecutable(tool);
+    if (!fromPath.isEmpty())
+        return fromPath;
+    for (const QString &directory : {QStringLiteral("/opt/homebrew/bin"),
+                                     QStringLiteral("/usr/local/bin")}) {
+        const QString path = QDir(directory).filePath(tool);
+        if (QFileInfo(path).isExecutable())
+            return path;
+    }
+#endif
     return QStandardPaths::findExecutable(tool);
 }
 

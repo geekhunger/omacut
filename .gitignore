@@ -1,4 +1,7 @@
 /build/
+/dist/
+__pycache__/
+.DS_Store
 *.o
 *.moc
 moc_*.cpp

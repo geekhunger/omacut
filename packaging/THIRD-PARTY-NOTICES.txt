@@ -1,0 +1,26 @@
+Omacut macOS community build
+
+Omacut's original and macOS-specific source code is available under the MIT
+license in LICENSE. Copyright notices are preserved in the source repository.
+
+This application bundle also contains separately licensed software, including
+Qt 6, FFmpeg, and their dependencies. Qt modules include LGPLv3 and GPLv3 code;
+the bundled FFmpeg is configured with GPL and version3 support. Redistribution
+of the combined binary package is subject to the applicable GPLv3 terms.
+The MIT license of Omacut's own source code is unchanged.
+
+The same GitHub release supplies a third-party source archive containing the
+matching dependency sources, patches, license texts, and Homebrew build
+formulas. Its manifest identifies the exact versions and source checksums.
+Omacut's source and macOS packaging scripts are supplied in this repository:
+https://github.com/geekhunger/omacut
+
+There is no warranty, to the extent permitted by applicable law. You may study,
+modify, rebuild, and redistribute this software under its applicable licenses.
+The bundle uses dynamic libraries and an ad-hoc signature. Modified bundles
+can be re-signed locally using: codesign --force --deep --sign - Omacut.app
+No Apple Developer account is required to build or locally sign this version.
+
+Individual dependency licenses and build metadata are in the subdirectories
+of Contents/Resources/Licenses. Additional bundled third-party notices are in
+the source archives and Qt's Software Bill of Materials (SPDX) files.

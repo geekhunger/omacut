@@ -27,4 +27,8 @@ cd "$BUILD_DIR"
 "$QMAKE" "$ROOT/omacut.pro"
 make -j"$JOBS"
 
-echo "Built $BUILD_DIR/omacut"
+if [ -d "$BUILD_DIR/omacut.app" ]; then
+  echo "Built $BUILD_DIR/omacut.app"
+else
+  echo "Built $BUILD_DIR/omacut"
+fi

@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+# Prepare local release assets; publishing to GitHub is a separate operation.
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
+./bin/package-macos
+./bin/collect-macos-sources
+codesign --force --deep --sign - dist/Omacut.app
+codesign --verify --deep --strict dist/Omacut.app
+./bin/verify-macos-bundle dist/Omacut.app
+VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' dist/Omacut.app/Contents/Info.plist)
+NAME="Omacut-$VERSION-macos-$(uname -m)"
+ditto -c -k --sequesterRsrc --keepParent dist/Omacut.app "dist/$NAME.zip"
+mkdir -p dist/dmg-root
+ditto dist/Omacut.app dist/dmg-root/Omacut.app
+ln -sfn /Applications dist/dmg-root/Applications
+cp packaging/INSTALLATION.txt dist/dmg-root/INSTALLATION.txt
+hdiutil create -ov -volname "Omacut $VERSION" -srcfolder dist/dmg-root -format UDZO "dist/$NAME.dmg"
+COPYFILE_DISABLE=1 tar -czf "dist/Omacut-$VERSION-third-party-sources.tar.gz" -C dist third-party-sources
+cd dist
+shasum -a 256 "$NAME.zip" "$NAME.dmg" "Omacut-$VERSION-third-party-sources.tar.gz" > SHA256SUMS.txt
+echo "Release assets are in $ROOT/dist"

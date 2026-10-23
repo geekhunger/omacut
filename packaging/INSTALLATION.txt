@@ -1,0 +1,22 @@
+Omacut 0.7.2 - macOS community build
+https://github.com/geekhunger/omacut
+
+Requirements: Apple Silicon Mac (arm64), macOS 26 or later.
+Qt, FFmpeg and FFprobe are included. Homebrew is not needed to run the app.
+
+INSTALL
+Open the DMG (or unzip the ZIP), then drag Omacut.app to Applications.
+
+FIRST LAUNCH
+This community build is ad-hoc signed, not Apple Developer ID signed or
+notarized. If macOS blocks it, first try to open the app, then go to:
+System Settings > Privacy & Security > Open Anyway. Confirm Open.
+https://support.apple.com/en-us/102445
+
+Updates are manual. Download future builds from this fork's Releases page.
+This is not an official macOS release from the upstream Omacut project.
+
+LICENSES AND SOURCES
+Omacut's source is MIT licensed. The bundle also includes GPL/LGPL software.
+See Omacut.app/Contents/Resources/Licenses and the matching third-party source
+archive provided alongside this download. There is no warranty.

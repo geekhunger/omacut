@@ -20,6 +20,9 @@
 
 #include "filepicker.h"
 #include "portalfilepicker.h"
+#ifdef Q_OS_MACOS
+#include "macfilepicker.h"
+#endif
 #include "thumbprovider.h"
 
 namespace {
@@ -52,7 +55,11 @@ bool replaceWithTemp(const QString &tmpPath, const QString &outPath) {
 }
 
 Backend::Backend(ThumbProvider *provider, QObject *parent)
+#ifdef Q_OS_MACOS
+    : Backend(provider, new MacFilePicker(), parent) {}
+#else
     : Backend(provider, new PortalFilePicker(), parent) {}
+#endif
 
 Backend::Backend(ThumbProvider *provider, FilePicker *filePicker, QObject *parent)
     : QObject(parent), m_provider(provider), m_filePicker(filePicker),

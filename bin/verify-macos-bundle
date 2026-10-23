@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""Reject missing or machine-local Mach-O dependencies in a release bundle."""
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+app = Path(sys.argv[1]).resolve()
+errors = []
+count = 0
+for p in app.rglob("*"):
+    if not p.is_file() or p.is_symlink():
+        continue
+    with p.open("rb") as stream:
+        magic = stream.read(4)
+    if magic not in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"):
+        continue
+    count += 1
+    ids = subprocess.check_output(["otool", "-D", str(p)], text=True).splitlines()[1:]
+    deps = subprocess.check_output(["otool", "-L", str(p)], text=True).splitlines()[1:]
+    for line in deps:
+        dep = line.strip().split(" (compatibility")[0]
+        if dep in ids or dep.startswith(("/System/Library/", "/usr/lib/")):
+            continue
+        resolved = None
+        if dep.startswith("@loader_path/"):
+            resolved = p.parent / dep.removeprefix("@loader_path/")
+        elif dep.startswith("@executable_path/"):
+            resolved = app / "Contents/MacOS" / dep.removeprefix("@executable_path/")
+        if resolved is None or not resolved.exists() or not resolved.resolve().is_relative_to(app):
+            errors.append({"file": str(p.relative_to(app)), "dependency": dep})
+print(json.dumps({"mach_o_files": count, "errors": errors}, indent=2))
+sys.exit(bool(errors))

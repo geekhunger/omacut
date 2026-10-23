@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Collect the matching source archives, build formulas, patches and notices."""
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
+import json
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import tarfile
+from urllib.parse import urlparse
+
+ROOT = Path(__file__).resolve().parent.parent
+DIST = ROOT / "dist"
+DEST = DIST / "third-party-sources"
+LICENSES = DIST / "Omacut.app/Contents/Resources/Licenses"
+BREW = Path("/opt/homebrew" if Path("/opt/homebrew/bin/brew").exists() else "/usr/local")
+
+
+def fetch(url, path, checksum=None):
+    if not path.exists():
+        subprocess.run(["curl", "--fail", "--location", "--retry", "3", "--connect-timeout", "20", "--max-time", "600", "--silent", "--show-error", url, "-o", str(path)], check=True)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if checksum and digest != checksum:
+        path.unlink()
+        raise RuntimeError("Source checksum mismatch: " + url)
+    return {"url": url, "file": str(path.relative_to(DEST)), "sha256": digest}
+
+
+def collect(dep):
+    name, version = dep["name"], dep["version"]
+    prefix = BREW / "Cellar" / name / version
+    dest = DEST / name
+    dest.mkdir(parents=True, exist_ok=True)
+    formula = prefix / ".brew" / (name + ".rb")
+    shutil.copy2(formula, dest / formula.name)
+    text = formula.read_text()
+    records = []
+    pending = None
+    for line in text.splitlines():
+        match = re.match(r'\s*url "([^"]+)"', line)
+        if match:
+            pending = match.group(1)
+        match = re.match(r'\s*sha256 "([a-f0-9]{64})"', line)
+        if match and pending:
+            if records and not (".patch" in pending or ".diff" in pending or (name == "glib" and "gobject-introspection" in pending)):
+                pending = None
+                continue
+            filename = Path(urlparse(pending).path).name
+            records.append(fetch(pending, dest / (str(len(records)) + "-" + filename), match.group(1)))
+            pending = None
+    if not records:
+        match = re.search(r'url "([^"]+\.git)",\s+revision: "([a-f0-9]+)"', text)
+        if not match:
+            raise RuntimeError("No pinned source found for " + name)
+        url, revision = match.groups()
+        checkout = DIST / ("source-checkout-" + name)
+        if not checkout.exists():
+            subprocess.run(["git", "init", str(checkout)], check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "-C", str(checkout), "fetch", "--depth=1", url, revision], check=True)
+        actual = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "FETCH_HEAD"], text=True).strip()
+        if actual != revision:
+            raise RuntimeError("Wrong source revision for " + name)
+        archive = dest / (name + "-" + revision + ".tar.gz")
+        subprocess.run(["git", "-C", str(checkout), "archive", "--format=tar.gz", "--prefix=" + name + "/", "-o", str(archive), revision], check=True)
+        records.append({"url": url, "revision": revision, "file": str(archive.relative_to(DEST)), "sha256": hashlib.sha256(archive.read_bytes()).hexdigest()})
+    # Homebrew formulas may include both embedded DATA patches and patch files.
+    if "__END__" in text:
+        (dest / "homebrew-data.patch").write_text(text.split("__END__", 1)[1].lstrip())
+    for patch in re.findall(r'file "(Patches/[^"]+)"', text):
+        info = json.loads(subprocess.check_output([str(BREW / "bin/brew"), "info", "--json=v2", name], text=True))["formulae"][0]
+        checksum = info["local_patch_checksums"][patch]
+        records.append(fetch("https://raw.githubusercontent.com/Homebrew/homebrew-core/HEAD/" + patch, dest / Path(patch).name, checksum))
+    notices = LICENSES / name / "source-notices"
+    notices.mkdir(parents=True, exist_ok=True)
+    for record in records:
+        archive = DEST / record["file"]
+        if not tarfile.is_tarfile(archive):
+            continue
+        with tarfile.open(archive) as tar:
+            for member in tar:
+                if not member.isfile() or member.size > 2_000_000:
+                    continue
+                parts = Path(member.name).parts
+                # Root license files, and complete explicitly named license folders.
+                if (len(parts) <= 2 and re.search(r'licen[sc]e|copying|copyright|notice|authors', parts[-1], re.I)) or any(p.lower() in ("licenses", "licences") for p in parts):
+                    relative = Path(*parts[1:]) if len(parts) > 1 else Path(parts[0])
+                    if ".." in relative.parts or relative.is_absolute():
+                        continue
+                    target = notices / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(tar.extractfile(member).read())
+    print("Collected", name, version, flush=True)
+    return {**dep, "sources": records, "build_formula": str((dest / formula.name).relative_to(DEST))}
+
+
+if __name__ == "__main__":
+    DEST.mkdir(exist_ok=True)
+    deps = json.loads((DIST / "dependencies.json").read_text())
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        manifest = list(pool.map(collect, deps))
+    (DEST / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (DEST / "README.txt").write_text("Matching sources for the Omacut macOS release.\n\nmanifest.json records exact source URLs, versions, hashes and Git revisions.\nEach directory contains the source archive and the Homebrew formula used to\nbuild that dependency, including build options, inline replacements and patches.\nApply external and embedded patches as specified in the formula. System SDK\nframeworks and Apple-provided libraries are not redistributed. Build tools\n(C/C++ compiler, CMake, Meson, Ninja, Python, etc.) are available separately.\n\nOmacut source and packaging scripts: https://github.com/geekhunger/omacut\nIts MIT license is preserved. See each source archive for third-party licenses.\nThe GPLv3/LGPL components are supplied without warranty.\n")
+    shutil.copy2(DEST / "manifest.json", LICENSES / "source-manifest.json")
+    print("Source collection complete", flush=True)

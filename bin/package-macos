@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Build a self-contained, ad-hoc-signed macOS app using Homebrew Qt/FFmpeg."""
+import json
+import os
+from pathlib import Path
+import plistlib
+import re
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+DIST = ROOT / "dist"
+APP = DIST / "Omacut.app"
+FRAMEWORKS = APP / "Contents/Frameworks"
+BREW_COMMAND = "/opt/homebrew/bin/brew" if os.uname().machine == "arm64" and Path("/opt/homebrew/bin/brew").exists() else "brew"
+BREW = Path(subprocess.check_output([BREW_COMMAND, "--prefix"], text=True).strip())
+os.environ["PATH"] = str(BREW / "bin") + os.pathsep + os.environ["PATH"]
+FORMULAS = {}
+
+
+def run(*args, **kwargs):
+    return subprocess.run([str(a) for a in args], check=True, **kwargs)
+
+
+def output(*args):
+    return subprocess.check_output([str(a) for a in args], text=True)
+
+
+def macho(path):
+    if not path.is_file() or path.is_symlink():
+        return False
+    with path.open("rb") as stream:
+        magic = stream.read(4)
+    return magic in (
+        b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf")
+
+
+def register(path):
+    resolved = path.resolve()
+    try:
+        parts = resolved.relative_to(BREW / "Cellar").parts
+    except ValueError:
+        return
+    formula, version = parts[:2]
+    FORMULAS[formula] = str(BREW / "Cellar" / formula / version)
+
+
+def locate(relative):
+    hits = sorted((BREW / "opt").glob("*/lib/" + relative))
+    if not hits:
+        raise RuntimeError("Cannot locate dependency: " + relative)
+    # Prefer the current Homebrew opt symlink, never an arbitrary old Cellar version.
+    return hits[0]
+
+
+def dependency(old):
+    if old.startswith(("/System/Library/", "/usr/lib/")):
+        return None
+    if old.startswith("/"):
+        source = Path(old)
+        if ".framework/" in old:
+            match = re.search(r"([^/]+\.framework/.+)$", old)
+            relative = match.group(1)
+        else:
+            relative = source.name
+    elif ".framework/" in old:
+        relative = re.search(r"([^/]+\.framework/.+)$", old).group(1)
+        source = locate(relative)
+    else:
+        relative = Path(old).name
+        source = locate(relative)
+    register(source)
+    dest = FRAMEWORKS / relative
+    if not dest.exists():
+        if ".framework/" in relative:
+            framework = relative.split("/")[0]
+            origin = source
+            while origin.name != framework:
+                origin = origin.parent
+            shutil.copytree(origin, FRAMEWORKS / framework, symlinks=True, dirs_exist_ok=True)
+            for unused in (FRAMEWORKS / framework).rglob("Headers"):
+                if unused.is_symlink():
+                    unused.unlink()
+                elif unused.is_dir():
+                    shutil.rmtree(unused)
+        else:
+            shutil.copy2(source.resolve(), dest)
+    return dest
+
+
+def bundle():
+    if "--resume" not in sys.argv:
+        run(ROOT / "bin/build", cwd=ROOT)
+        DIST.mkdir(exist_ok=True)
+        if APP.exists():
+            shutil.rmtree(APP)
+        shutil.copytree(ROOT / "build/omacut.app", APP, symlinks=True)
+        helpers = APP / "Contents/Helpers"
+        helpers.mkdir(exist_ok=True)
+        for tool in ("ffmpeg", "ffprobe"):
+            shutil.copy2((BREW / "bin" / tool).resolve(), helpers / tool)
+        run("macdeployqt", APP, "-qmldir=" + str(ROOT / "src"), "-always-overwrite", "-no-codesign",
+            "-libpath=" + str(BREW / "opt/qtquicktimeline/lib"),
+            "-libpath=" + str(BREW / "opt/qtsvg/lib"))
+    elif not APP.exists():
+        raise RuntimeError("--resume requires an existing staged app")
+    for tool in ("ffmpeg", "ffprobe"):
+        register(BREW / "bin" / tool)
+    processed = set()
+    while True:
+        pending = [p for p in APP.rglob("*") if p not in processed and macho(p)]
+        if not pending:
+            break
+        for path in pending:
+            processed.add(path)
+            run("chmod", "u+w", path)
+            run("codesign", "--remove-signature", path, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            lines = output("otool", "-L", path).splitlines()[1:]
+            ids = output("otool", "-D", path).splitlines()[1:]
+            for line in lines:
+                old = line.strip().split(" (compatibility")[0]
+                if old in ids:
+                    continue
+                dest = dependency(old)
+                if dest is not None:
+                    new = "@loader_path/" + os.path.relpath(dest, path.parent)
+                    if old != new:
+                        run("install_name_tool", "-change", old, new, path)
+            if ids:
+                run("install_name_tool", "-id", "@rpath/" + os.path.relpath(path, FRAMEWORKS), path)
+            load = output("otool", "-l", path)
+            for rpath in re.findall(r"cmd LC_RPATH\s+cmdsize \d+\s+path (.+?) \(offset", load):
+                if rpath.startswith("/"):
+                    run("install_name_tool", "-delete_rpath", rpath, path)
+    # Attribute all deployed Qt modules, including ones deployed by macdeployqt.
+    for framework in FRAMEWORKS.glob("*.framework"):
+        register(locate(framework.name + "/Versions/A/" + framework.stem))
+    notices = APP / "Contents/Resources/Licenses"
+    notices.mkdir(parents=True, exist_ok=True)
+    # Explicit paths keep Qt plugin/QML discovery independent of Homebrew.
+    (APP / "Contents/Resources/qt.conf").write_text("[Paths]\nPlugins = PlugIns\nQmlImports = Resources/qml\n")
+    shutil.copy2(ROOT / "LICENSE", notices / "Omacut-MIT.txt")
+    shutil.copy2(ROOT / "packaging/THIRD-PARTY-NOTICES.txt", notices)
+    for name, prefix in sorted(FORMULAS.items()):
+        prefix = Path(prefix)
+        target = notices / name
+        target.mkdir(exist_ok=True)
+        shutil.copy2(prefix / ".brew" / (name + ".rb"), target / "homebrew-formula.rb")
+        for p in prefix.iterdir():
+            if p.is_file() and re.search(r"license|copying|copyright|notice", p.name, re.I):
+                shutil.copy2(p, target / p.name)
+        for directory in (prefix / "share/licenses", prefix / "share/qt/sbom"):
+            if directory.exists():
+                shutil.copytree(directory, target / directory.name, dirs_exist_ok=True)
+    manifest = [{"name": name, "version": Path(prefix).name} for name, prefix in sorted(FORMULAS.items())]
+    (DIST / "dependencies.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    shutil.copy2(DIST / "dependencies.json", notices / "dependencies.json")
+    run("python3", ROOT / "bin/verify-macos-bundle", APP)
+    for path in sorted(processed, key=lambda p: len(p.parts), reverse=True):
+        # Signing the main executable signs its bundle too; do that last.
+        if path == APP / "Contents/MacOS/omacut":
+            continue
+        run("codesign", "--force", "--sign", "-", path)
+    run("codesign", "--force", "--deep", "--sign", "-", APP)
+    run("codesign", "--verify", "--deep", "--strict", APP)
+    with (APP / "Contents/Info.plist").open("rb") as stream:
+        version = plistlib.load(stream)["CFBundleShortVersionString"]
+    print("Packaged", APP, "version", version)
+
+
+if __name__ == "__main__":
+    bundle()

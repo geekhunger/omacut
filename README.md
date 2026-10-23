@@ -1,5 +1,60 @@
 # Omacut
 
+## macOS community fork
+
+This fork adds a native macOS application to [omacom/omacut](https://github.com/omacom/omacut).
+
+**[Download the compiled macOS app](https://github.com/geekhunger/omacut/releases/latest)**
+
+- Apple Silicon (arm64), macOS 26 or later. Intel Macs are not supported by this binary.
+- Qt, FFmpeg and FFprobe are included; Homebrew is not required to run the app.
+- Native macOS open/save dialogs, export-quality selection and opening videos from Finder.
+- Uses macOS video acceleration for preview where supported.
+- Community build; not an official upstream release. Updates are manual.
+
+### Install on macOS
+
+Download `Omacut-0.7.2-macos-arm64.zip` from Releases, unzip it and drag `Omacut.app`
+to Applications. Alternatively, open the DMG and drag the app to Applications.
+
+This build is ad-hoc signed, **not Apple Developer ID signed or notarized**.
+macOS may block its first launch. After trying to open it, use
+**System Settings → Privacy & Security → Open Anyway** and confirm the launch.
+See [Apple's instructions](https://support.apple.com/en-us/102445).
+
+The release also includes SHA-256 checksums and a separate archive of the
+matching third-party sources, patches and build formulas.
+
+### Build and package on macOS
+
+Install Xcode Command Line Tools and the build dependencies:
+
+```sh
+brew install qtbase qtdeclarative qtmultimedia qtsvg qtquicktimeline ffmpeg
+./bin/build
+./bin/test
+./bin/package-macos
+./bin/collect-macos-sources
+codesign --force --deep --sign - dist/Omacut.app
+codesign --verify --deep --strict dist/Omacut.app
+```
+
+`bin/package-macos` creates `dist/Omacut.app`, bundles dynamic dependencies,
+rewrites their load paths, verifies that they resolve inside the app or to
+macOS system libraries, and applies an ad-hoc signature.
+`bin/collect-macos-sources` downloads and verifies sources matching the installed
+dependency versions and adds their license notices; re-sign after this step.
+Use the release's pinned source manifest and formulas to reproduce dependency
+versions rather than assuming a future `brew install` produces the same build.
+`./bin/release-macos` runs the packaging and source steps and creates the ZIP,
+DMG, third-party source archive and checksums in `dist/`.
+
+Omacut's own source remains MIT licensed. The downloadable application also
+includes GPL/LGPL components; see
+[third-party notices](packaging/THIRD-PARTY-NOTICES.txt) and the source archive.
+
+---
+
 A dead-simple video editor. Open a video, trim either end, split it into clips and cut pieces out, add more videos and put the clips in any order, preview the result, and export. On Omarchy, the interface follows your theme's accent color.
 
 Built using **Qt Quick (QML)** UI with the Material style — the same Qt stack Quickshell builds on — and **ffmpeg** for the cut. The C++ side compiles to a single executable; the QML is embedded in it via Qt resources.

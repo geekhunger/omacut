@@ -22,3 +22,10 @@ SOURCES += \
     ../src/portalfilepicker.cpp \
     ../src/thumbprovider.cpp \
     ../src/timeline.cpp \
+
+macx {
+    HEADERS += ../src/macfilepicker.h
+    OBJECTIVE_SOURCES += ../src/macfilepicker.mm
+    QMAKE_OBJECTIVE_CXXFLAGS += -fobjc-arc
+    LIBS += -framework AppKit -framework UniformTypeIdentifiers
+}

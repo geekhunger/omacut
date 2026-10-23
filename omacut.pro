@@ -23,3 +23,12 @@ SOURCES += \
     src/backend.cpp
 
 RESOURCES += src/resources.qrc
+
+macx {
+    HEADERS += src/macfilepicker.h
+    OBJECTIVE_SOURCES += src/macfilepicker.mm
+    QMAKE_OBJECTIVE_CXXFLAGS += -fobjc-arc
+    LIBS += -framework AppKit -framework UniformTypeIdentifiers
+    ICON = packaging/Omacut.icns
+    QMAKE_INFO_PLIST = packaging/Info.plist
+}
