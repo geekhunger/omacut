@@ -93,6 +93,8 @@ These bindings are included in the
 - `X`, `Delete` or `Backspace`: Remove the clip under the playhead.
 - `-`, `−`, `–` or `—`: Move the current clip one position earlier, keeping the playhead on the same frame of that clip.
 - `+`: Move the current clip one position later, keeping the playhead on the same frame of that clip.
+- `[`: Move the current clip's start (in marker) to the playhead.
+- `]`: Move the current clip's end (out marker) to the playhead.
 - `Cmd+Z`: Undo.
 - `Cmd+Shift+Z` or `Cmd+Y`: Redo.
 - `Z`: Zoom into the clip at the playhead; press again to show the whole edit immediately. The view follows the playhead and adapts to edits so the shortest clip spans at least 10% of the visible timeline.
@@ -106,7 +108,8 @@ These bindings are included in the
 
 Clip-move shortcuts follow the character typed by the active keyboard layout,
 including numeric-keypad `+` / `-` and Option combinations that produce `–` or `—`.
-Cmd combinations keep their own meanings.
+Cmd combinations keep their own meanings. On a German Mac keyboard, type `[`
+with `Option+5` and `]` with `Option+6`.
 
 ## Install
 
@@ -169,12 +172,13 @@ customizations. They are included in the
 
 - **Clip-edge navigation:** Replaced `[` / `]` with `Shift+Tab` / `Tab`. Repeated presses traverse clip in/out points; reversing direction visits the other edge of the same clip first. An out-point preview stays on that clip's last frame rather than switching to the next clip.
 - **Clip movement:** Replaced `Alt+[` / `Alt+]` with minus/dash characters and `+`. Moving preserves the selected clip, its preview frame and its in/out-edge association, including repeated moves and reversing direction at the sequence boundaries.
-- **Keyboard-layout handling:** Added character-based clip-move detection for `+`, `-`, `−`, `–` and `—`, numeric-keypad keys and macOS Option-generated dashes. Physical key codes no longer override the character actually typed; Cmd shortcuts remain separate.
-- **Keyboard controls and help:** Removed the two modifier-plus-Space trim shortcuts and switched the macOS help/README labels to `Cmd`. Made `0` a dedicated jump-to-start shortcut, retained `1`–`9` for 10%–90% jumps, and updated the in-app help for the revised navigation and movement keys.
+- **Clip trimming:** `[` moves the clip's in marker to the playhead; `]` moves its out marker to the playhead. Both also work when typed with Option on a German Mac keyboard.
+- **Keyboard-layout handling:** Added character-based editing shortcuts for `+`, `-`, `−`, `–`, `—`, `[` and `]`, numeric-keypad keys and macOS Option-generated characters. Physical key codes no longer override the character actually typed; Cmd shortcuts remain separate.
+- **Keyboard controls and help:** Removed the modifier-plus-Space trim bindings and switched Mac help/documentation to `Cmd`. Made `0` a dedicated jump-to-start shortcut, retained `1`–`9` for 10%–90% jumps, and updated the in-app help for the revised navigation and movement keys.
 - **Zoom toggle:** Changed `Z` so a second press always returns immediately to the whole edit, including after trimming or moving to a different clip.
 - **Zoom that follows editing:** Added automatic panning with the playhead during seeking, playback and clip-edge navigation. The zoom adapts when clip lengths change so the shortest clip spans at least 10% of the visible timeline, while preserving stable coordinates during handle/clip drags.
 - **Faster clip dragging:** Reduced the hold delay before picking up a clip from 350 ms to 220 ms.
-- **Regression coverage:** Added and updated tests for Tab navigation and edge previews, clip movement at in/out points and sequence bounds, typed-character/keypad/dash handling, number jumps, zoom following and minimum visible clip size.
+- **Regression coverage:** Added and updated tests for Tab navigation and edge previews, clip movement at in/out points and sequence bounds, typed-character/keypad/dash handling, bracket trimming with Option and repeat/help guards, number jumps, zoom following and minimum visible clip size.
 
 ### App-update tooling
 

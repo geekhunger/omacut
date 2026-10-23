@@ -18,12 +18,17 @@ protected:
             || !m_window->property("editing").toBool())
             return false;
         const auto *key = static_cast<QKeyEvent *>(event);
+        const bool bracketStart = key->text() == QStringLiteral("[")
+            || (key->text().isEmpty() && key->key() == Qt::Key_BracketLeft);
+        const bool bracketEnd = key->text() == QStringLiteral("]")
+            || (key->text().isEmpty() && key->key() == Qt::Key_BracketRight);
+        const bool bracket = bracketStart || bracketEnd;
         const bool dash = key->text() == QStringLiteral("\u2013")
             || key->text() == QStringLiteral("\u2014");
         // Option/Alt is how macOS types these characters; keep other Alt
         // shortcuts and all Control/Command combinations untouched.
         if ((key->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))
-            || ((key->modifiers() & Qt::AltModifier) && !dash))
+            || ((key->modifiers() & Qt::AltModifier) && !dash && !bracket))
             return false;
         int direction = 0;
         if (key->text() == QStringLiteral("+"))
@@ -36,11 +41,17 @@ protected:
             else if (key->key() == Qt::Key_Minus)
                 direction = -1;
         }
-        if (!direction)
+        if (!direction && !bracket)
             return false;
         event->accept();
         if (event->type() == QEvent::ShortcutOverride)
             return true;
+        if (bracket) {
+            if (key->isAutoRepeat())
+                return true;
+            return QMetaObject::invokeMethod(m_window, "trimClipAtPlayhead",
+                                             Q_ARG(QVariant, QVariant(bracketStart)));
+        }
         return QMetaObject::invokeMethod(m_window, "moveClipBy",
                                          Q_ARG(QVariant, QVariant(direction)));
     }

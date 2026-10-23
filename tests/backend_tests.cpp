@@ -290,6 +290,7 @@ private slots:
     void qmlArrowKeysMoveThePlayhead();
     void qmlNumberKeysJumpThroughTheEdit();
     void qmlSpaceChordsDoNotTrimClips();
+    void qmlBracketKeysSetTheClipEdges();
     void qmlKeysSplitAndRemoveClips();
     void qmlTabsJumpBetweenClipEdges();
     void qmlKeysMoveAndAddClips();
@@ -1385,6 +1386,48 @@ void BackendTests::qmlSpaceChordsDoNotTrimClips() {
     QCOMPARE(backend.timeline.clips(), wholeVideo(20.0));
     QCOMPARE(playhead(harness), 10.0);
     QVERIFY(!backend.timeline.canUndo());
+}
+
+void BackendTests::qmlBracketKeysSetTheClipEdges() {
+    ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
+    QmlHarness harness(backend);
+    QQuickWindow *window = showEditor(harness, backend);
+    QVERIFY2(window, qPrintable(mainQmlPath()));
+    for (int i = 0; i < 3; ++i)
+        QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 15.0, 3000);
+    QTest::keyClick(window, Qt::Key_BracketRight);
+    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 0.0, 15.0}}), 3000);
+    QTest::keyClick(window, Qt::Key_Left, Qt::ShiftModifier);
+    QTest::keyClick(window, Qt::Key_Left, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
+    QTest::keyClick(window, Qt::Key_BracketLeft);
+    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 5.0, 15.0}}), 3000);
+
+    // German macOS layouts type brackets with Option+5/6. Their characters
+    // must trim, without activating the number-key seeking shortcuts.
+    backend.timeline.reset(20.0);
+    QTest::keyClick(window, Qt::Key_5);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 10.0, 3000);
+    QKeyEvent bracketOverride(QEvent::ShortcutOverride, Qt::Key_5, Qt::AltModifier,
+                             QStringLiteral("["));
+    bracketOverride.setAccepted(false);
+    QCoreApplication::sendEvent(window, &bracketOverride);
+    QVERIFY(bracketOverride.isAccepted());
+    QKeyEvent in(QEvent::KeyPress, Qt::Key_5, Qt::AltModifier, QStringLiteral("["));
+    QCoreApplication::sendEvent(window, &in);
+    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 10.0, 20.0}}), 3000);
+    QTest::keyClick(window, Qt::Key_5);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
+    QKeyEvent out(QEvent::KeyPress, Qt::Key_6, Qt::AltModifier, QStringLiteral("]"));
+    QCoreApplication::sendEvent(window, &out);
+    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 10.0, 15.0}}), 3000);
+    QKeyEvent repeat(QEvent::KeyPress, Qt::Key_6, Qt::AltModifier, QStringLiteral("]"), true);
+    QCoreApplication::sendEvent(window, &repeat);
+    QCOMPARE(backend.timeline.clips(), (edit::Clips{{0, 10.0, 15.0}}));
+    window->setProperty("helpVisible", true);
+    QCoreApplication::sendEvent(window, &in);
+    QCOMPARE(backend.timeline.clips(), (edit::Clips{{0, 10.0, 15.0}}));
 }
 
 void BackendTests::qmlKeysSplitAndRemoveClips() {

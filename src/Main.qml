@@ -163,6 +163,9 @@ ApplicationWindow {
         }
     }
     property bool quitting: false
+    function trimClipAtPlayhead(start) {
+        timeline.trimTo(editBar.playheadSec, start);
+    }
     function requestQuit() {
         if (unexported) {
             if (player.playbackState === MediaPlayer.PlayingState)
@@ -970,6 +973,8 @@ ApplicationWindow {
                         { keys: "X", action: "Remove the clip" },
                         { keys: "- / – / —", action: "Move the clip earlier" },
                         { keys: "+", action: "Move the clip later" },
+                        { keys: "[", action: "Clip start (in) to playhead" },
+                        { keys: "]", action: "Clip end (out) to playhead" },
                         { keys: "Cmd Z", action: "Undo (Cmd Shift Z redo)" },
                         { keys: "Z", action: "Zoom to the clip" },
                         { keys: "F", action: "Save the playhead frame as a PNG" },
