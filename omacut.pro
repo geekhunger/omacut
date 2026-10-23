@@ -5,6 +5,7 @@ TARGET = omacut
 TEMPLATE = app
 
 HEADERS += \
+    src/clipmovekeys.h \
     src/filepicker.h \
     src/portalfilepicker.h \
     src/edit.h \
@@ -25,6 +26,7 @@ SOURCES += \
 RESOURCES += src/resources.qrc
 
 macx {
+    QMAKE_MACOSX_DEPLOYMENT_TARGET = 26.0
     HEADERS += src/macfilepicker.h
     OBJECTIVE_SOURCES += src/macfilepicker.mm
     QMAKE_OBJECTIVE_CXXFLAGS += -fobjc-arc

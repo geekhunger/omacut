@@ -26,6 +26,7 @@
 #include <memory>
 
 #include "backend.h"
+#include "clipmovekeys.h"
 #include "filepicker.h"
 #include "portalfilepicker.h"
 #include "thumbprovider.h"
@@ -236,6 +237,8 @@ public:
         m_engine.load(QUrl::fromLocalFile(mainQmlPath()));
         if (!m_engine.rootObjects().isEmpty())
             m_window = qobject_cast<QQuickWindow *>(m_engine.rootObjects().first());
+        if (m_window)
+            new ClipMoveKeys(m_window);
     }
 
     QQuickWindow *window() const { return m_window; }
@@ -286,11 +289,16 @@ private slots:
     void qmlShortcutsTriggerBackendActions();
     void qmlArrowKeysMoveThePlayhead();
     void qmlNumberKeysJumpThroughTheEdit();
-    void qmlSpaceChordsSetTheClipEdges();
+    void qmlSpaceChordsDoNotTrimClips();
     void qmlKeysSplitAndRemoveClips();
-    void qmlBracketsJumpBetweenClipEdges();
+    void qmlTabsJumpBetweenClipEdges();
     void qmlKeysMoveAndAddClips();
+    void qmlKeysMoveClipAtInAndOutEdges();
+    void qmlHoldingMoveAtBoundsAllowsReversing();
+    void qmlMoveKeysFollowTypedCharacters();
     void qmlZoomFocusesTheClip();
+    void qmlZoomFollowsPlayheadAndExitsImmediately();
+    void qmlZoomKeepsShortestClipsAtTenPercent();
     void qmlPressingHandleScrubsItsFrame();
     void formatTimeShowsHoursFromSixtyMinutes();
     void qmlDropOpensThenAddsVideos();
@@ -1311,6 +1319,8 @@ void BackendTests::qmlNumberKeysJumpThroughTheEdit() {
     QVERIFY2(window, qPrintable(mainQmlPath()));
     QVERIFY(harness.editBar());
 
+    QTest::keyClick(window, Qt::Key_1);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 2.0, 3000);
     QTest::keyClick(window, Qt::Key_5);
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 10.0, 3000);
     QTest::keyClick(window, Qt::Key_9);
@@ -1358,37 +1368,23 @@ void BackendTests::qmlArrowKeysMoveThePlayhead() {
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
 
     QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
-    QTest::keyClick(window, Qt::Key_Space, Qt::ControlModifier);
+    backend.timeline.trimTo(playhead(harness), true);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 5.0, 20.0}}), 3000);
 }
 
-void BackendTests::qmlSpaceChordsSetTheClipEdges() {
+void BackendTests::qmlSpaceChordsDoNotTrimClips() {
     ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
     QmlHarness harness(backend);
     QQuickWindow *window = showEditor(harness, backend);
     QVERIFY2(window, qPrintable(mainQmlPath()));
-
-    // Park the playhead at 15 s and pull the end in to it.
-    for (int i = 0; i < 3; ++i)
-        QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
-    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 15.0, 3000);
-    QTest::keyClick(window, Qt::Key_Space, Qt::AltModifier);
-    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 0.0, 15.0}}), 3000);
-
-    // Same for the start, at 5 s. The clip now starts there, so the
-    // playhead's 5 s along the edit is 10 s into the video.
-    QTest::keyClick(window, Qt::Key_Left, Qt::ShiftModifier);
-    QTest::keyClick(window, Qt::Key_Left, Qt::ShiftModifier);
-    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
+    QTest::keyClick(window, Qt::Key_5);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 10.0, 3000);
     QTest::keyClick(window, Qt::Key_Space, Qt::ControlModifier);
-    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 5.0, 15.0}}), 3000);
-
-    // The edges never cross: pulling the end onto the start leaves the clip be.
-    QTest::keyClick(window, Qt::Key_Left, Qt::ShiftModifier);
-    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
     QTest::keyClick(window, Qt::Key_Space, Qt::AltModifier);
-    QTest::qWait(50);
-    QCOMPARE(backend.timeline.clips(), (edit::Clips{{0, 5.0, 15.0}}));
+    QCoreApplication::processEvents();
+    QCOMPARE(backend.timeline.clips(), wholeVideo(20.0));
+    QCOMPARE(playhead(harness), 10.0);
+    QVERIFY(!backend.timeline.canUndo());
 }
 
 void BackendTests::qmlKeysSplitAndRemoveClips() {
@@ -1434,7 +1430,7 @@ void BackendTests::qmlKeysSplitAndRemoveClips() {
                               (edit::Clips{{0, 0.0, 5.0}, {0, 10.0, 20.0}}), 3000);
 }
 
-void BackendTests::qmlBracketsJumpBetweenClipEdges() {
+void BackendTests::qmlTabsJumpBetweenClipEdges() {
     ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
     QmlHarness harness(backend);
     QQuickWindow *window = showEditor(harness, backend);
@@ -1445,17 +1441,58 @@ void BackendTests::qmlBracketsJumpBetweenClipEdges() {
     QTest::keyClick(window, Qt::Key_Right);
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 1.0, 3000);
 
-    QTest::keyClick(window, Qt::Key_BracketRight);
+    QTest::keyClick(window, Qt::Key_Tab);
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
-    QTest::keyClick(window, Qt::Key_BracketRight);
-    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 12.0, 3000);
-    QTest::keyClick(window, Qt::Key_BracketRight);
-    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 20.0, 3000);
-    QTest::keyClick(window, Qt::Key_BracketLeft);
-    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 12.0, 3000);
-    QTest::keyClick(window, Qt::Key_BracketLeft);
-    QTest::keyClick(window, Qt::Key_BracketLeft);
+    QObject *player = window->findChild<QObject *>(QStringLiteral("player"));
+    QVERIFY(player);
+    // This is clip 0's out frame, not clip 1's in frame at the same time.
+    QCOMPARE(player->property("clip").toInt(), 0);
+    QCOMPARE(harness.editBar()->property("edgeClip").toInt(), 0);
+    QTest::keyClick(window, Qt::Key_Tab, Qt::ShiftModifier);
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 0);
+    QTest::keyClick(window, Qt::Key_Tab);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
+    QTest::keyClick(window, Qt::Key_Tab);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 12.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 1);
+    // Reversing direction visits the same clip's opposite edge first.
+    QTest::keyClick(window, Qt::Key_Tab, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Tab);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 12.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Tab);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 20.0, 3000);
+    QTest::keyClick(window, Qt::Key_Tab);
+    QCOMPARE(playhead(harness), 20.0);
+    QTest::keyClick(window, Qt::Key_Tab, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 12.0, 3000);
+    QTest::keyClick(window, Qt::Key_Backtab, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
+    QTest::keyClick(window, Qt::Key_Tab, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+    QTest::keyClick(window, Qt::Key_Backtab, Qt::ShiftModifier);
+    QCOMPARE(playhead(harness), 0.0);
+
+    // Ordinary seeking resets the remembered clip. At clip 1's in point,
+    // the first Shift+Tab stays on that in point; the second visits clip 0.
+    QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
+    QTest::keyClick(window, Qt::Key_Tab, Qt::ShiftModifier);
+    QCOMPARE(playhead(harness), 5.0);
+    QCOMPARE(player->property("clip").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Tab, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 0);
+
+    QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
+    QTest::keyClick(window, Qt::Key_Right);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 6.0, 3000);
+    QTest::keyClick(window, Qt::Key_Tab, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 1);
 }
 
 void BackendTests::qmlKeysMoveAndAddClips() {
@@ -1478,23 +1515,152 @@ void BackendTests::qmlKeysMoveAndAddClips() {
                               (edit::Clips{{0, 0.0, 5.0}, {1, 0.0, 3.0}, {0, 5.0, 20.0}}), 3000);
     QTRY_COMPARE_WITH_TIMEOUT(window->property("unexported").toBool(), true, 3000);
 
-    // Alt+] moves the clip under the playhead later, and the playhead moves
+    // Plus moves the clip under the playhead later, and the playhead moves
     // with it, still 0.2 s in.
-    QTest::keyClick(window, Qt::Key_BracketRight, Qt::AltModifier);
+    QTest::keyClick(window, Qt::Key_Plus);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
                               (edit::Clips{{1, 0.0, 3.0}, {0, 0.0, 5.0}, {0, 5.0, 20.0}}), 3000);
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 3.2, 3000);
 
-    // At the end already, Alt+] does nothing; Alt+[ moves it back.
-    QTest::keyClick(window, Qt::Key_BracketRight, Qt::AltModifier);
-    QTest::keyClick(window, Qt::Key_BracketRight, Qt::AltModifier);
+    // At the end already, plus does nothing; minus moves it back.
+    QTest::keyClick(window, Qt::Key_Plus);
+    QTest::keyClick(window, Qt::Key_Plus);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
                               (edit::Clips{{1, 0.0, 3.0}, {0, 5.0, 20.0}, {0, 0.0, 5.0}}), 3000);
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 18.2, 3000);
-    QTest::keyClick(window, Qt::Key_BracketLeft, Qt::AltModifier);
+    QTest::keyClick(window, Qt::Key_Minus);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
                               (edit::Clips{{1, 0.0, 3.0}, {0, 0.0, 5.0}, {0, 5.0, 20.0}}), 3000);
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 3.2, 3000);
+}
+
+void BackendTests::qmlKeysMoveClipAtInAndOutEdges() {
+    ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
+    QmlHarness harness(backend);
+    QQuickWindow *window = showEditor(harness, backend);
+    QVERIFY2(window, qPrintable(mainQmlPath()));
+    QObject *player = window->findChild<QObject *>(QStringLiteral("player"));
+    QVERIFY(player);
+    backend.timeline.split(5.0);
+    backend.timeline.split(12.0);
+
+    // Tab previews the first clip's out frame. At the shared boundary,
+    // moving must retain this clip rather than selecting the following one.
+    QTest::keyClick(window, Qt::Key_Tab);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
+    QTest::keyClick(window, Qt::Key_Plus);
+    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
+        (edit::Clips{{0, 5.0, 12.0}, {0, 0.0, 5.0}, {0, 12.0, 20.0}}), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 12.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 1);
+    QCOMPARE(harness.editBar()->property("edgeClip").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Minus);
+    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
+        (edit::Clips{{0, 0.0, 5.0}, {0, 5.0, 12.0}, {0, 12.0, 20.0}}), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 0);
+
+    // Reversing to the in point still refers to that same clip after moving.
+    QTest::keyClick(window, Qt::Key_Tab, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+    QTest::keyClick(window, Qt::Key_Plus);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 7.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 1);
+    QCOMPARE(harness.editBar()->property("edgeClip").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Plus);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 15.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 2);
+    QTest::keyClick(window, Qt::Key_Plus);
+    QCOMPARE(playhead(harness), 15.0);
+    // Minus moves the same clip back.
+    QTest::keyClick(window, Qt::Key_Minus);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 7.0, 3000);
+    QCOMPARE(player->property("clip").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Minus, Qt::KeypadModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+    QTest::keyClick(window, Qt::Key_Plus, Qt::KeypadModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 7.0, 3000);
+}
+
+void BackendTests::qmlHoldingMoveAtBoundsAllowsReversing() {
+    ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
+    QmlHarness harness(backend);
+    QQuickWindow *window = showEditor(harness, backend);
+    QVERIFY2(window, qPrintable(mainQmlPath()));
+    backend.timeline.split(5.0);
+    backend.timeline.split(12.0);
+    QTest::keyClick(window, Qt::Key_Tab, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+
+    auto hold = [window](Qt::Key key, const QString &text) {
+        QTest::keyPress(window, key);
+        for (int i = 0; i < 30; ++i) {
+            QKeyEvent repeat(QEvent::KeyPress, key, Qt::NoModifier, text, true);
+            QCoreApplication::sendEvent(window, &repeat);
+        }
+        QTest::keyRelease(window, key);
+    };
+    hold(Qt::Key_Minus, QStringLiteral("-"));
+    QCOMPARE(playhead(harness), 0.0);
+    QCOMPARE(backend.timeline.clips(),
+        (edit::Clips{{0, 0.0, 5.0}, {0, 5.0, 12.0}, {0, 12.0, 20.0}}));
+    QTest::keyClick(window, Qt::Key_Plus, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 7.0, 3000);
+    QCOMPARE(harness.editBar()->property("edgeClip").toInt(), 1);
+    hold(Qt::Key_Plus, QStringLiteral("+"));
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 15.0, 3000);
+    QTest::keyClick(window, Qt::Key_Minus);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 7.0, 3000);
+    QCOMPARE(backend.timeline.clips(),
+        (edit::Clips{{0, 5.0, 12.0}, {0, 0.0, 5.0}, {0, 12.0, 20.0}}));
+}
+
+void BackendTests::qmlMoveKeysFollowTypedCharacters() {
+    ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
+    QmlHarness harness(backend);
+    QQuickWindow *window = showEditor(harness, backend);
+    QVERIFY2(window, qPrintable(mainQmlPath()));
+    backend.timeline.split(5.0);
+    QTest::keyClick(window, Qt::Key_Plus);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 15.0, 3000);
+
+    // A layout can report a physical key code different from its typed text.
+    QKeyEvent minus(QEvent::KeyPress, Qt::Key_Slash, Qt::NoModifier, QStringLiteral("-"));
+    QCoreApplication::sendEvent(window, &minus);
+    QCOMPARE(playhead(harness), 0.0);
+    QCOMPARE(backend.timeline.clips(), (edit::Clips{{0, 0.0, 5.0}, {0, 5.0, 20.0}}));
+    QKeyEvent plus(QEvent::KeyPress, Qt::Key_Equal, Qt::ShiftModifier, QStringLiteral("+"));
+    QCoreApplication::sendEvent(window, &plus);
+    QCOMPARE(playhead(harness), 15.0);
+
+    // The key's printed character takes precedence over its physical code.
+    QKeyEvent underscore(QEvent::KeyPress, Qt::Key_Minus, Qt::ShiftModifier, QStringLiteral("_"));
+    QCoreApplication::sendEvent(window, &underscore);
+    QCOMPARE(playhead(harness), 15.0);
+
+    // En/em dashes also move left, including the Option combinations used
+    // to type them on macOS. Modifier keys must not suppress the character.
+    for (const QString &dash : {QStringLiteral("\u2013"), QStringLiteral("\u2014")}) {
+        for (Qt::KeyboardModifiers modifiers : {Qt::KeyboardModifiers{},
+                Qt::KeyboardModifiers(Qt::AltModifier),
+                Qt::KeyboardModifiers(Qt::AltModifier | Qt::ShiftModifier)}) {
+            QKeyEvent shortcut(QEvent::ShortcutOverride, Qt::Key_Minus, modifiers, dash);
+            shortcut.setAccepted(false);
+            QCoreApplication::sendEvent(window, &shortcut);
+            QVERIFY(shortcut.isAccepted());
+            QCOMPARE(playhead(harness), 15.0);
+            QKeyEvent press(QEvent::KeyPress, Qt::Key_Minus, modifiers, dash);
+            QCoreApplication::sendEvent(window, &press);
+            QCOMPARE(playhead(harness), 0.0);
+            QTest::keyClick(window, Qt::Key_Plus);
+            QCOMPARE(playhead(harness), 15.0);
+        }
+        for (Qt::KeyboardModifier modifier : {Qt::ControlModifier, Qt::MetaModifier}) {
+            QKeyEvent modified(QEvent::KeyPress, Qt::Key_Minus, modifier, dash);
+            QCoreApplication::sendEvent(window, &modified);
+            QCOMPARE(playhead(harness), 15.0);
+        }
+    }
 }
 
 void BackendTests::qmlZoomFocusesTheClip() {
@@ -1518,18 +1684,12 @@ void BackendTests::qmlZoomFocusesTheClip() {
     QCOMPARE(editBar->property("viewEndSec").toDouble(), 16.25);
 
     // Tighten the clip while zoomed: end to the playhead at 10 s.
-    QTest::keyClick(window, Qt::Key_Space, Qt::AltModifier);
+    backend.timeline.trimTo(playhead(harness), false);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
                               (edit::Clips{{0, 0.0, 5.0}, {0, 5.0, 10.0}, {0, 15.0, 20.0}}), 3000);
     QTest::keyClick(window, Qt::Key_Left);
 
-    // The clip changed since the zoom, so Z zooms again instead of out.
-    QTest::keyClick(window, Qt::Key_Z);
-    QTRY_COMPARE_WITH_TIMEOUT(editBar->property("viewStartSec").toDouble(), 4.375, 3000);
-    QCOMPARE(editBar->property("viewEndSec").toDouble(), 10.625);
-    QCOMPARE(editBar->property("zoomed").toBool(), true);
-
-    // Untouched since the last zoom, so Z now zooms back out to the whole edit.
+    // Even after trimming the clip, one Z immediately shows the whole edit.
     QTest::keyClick(window, Qt::Key_Z);
     QTRY_COMPARE_WITH_TIMEOUT(editBar->property("zoomed").toBool(), false, 3000);
 
@@ -1542,6 +1702,100 @@ void BackendTests::qmlZoomFocusesTheClip() {
     backend.timeline.removeClip(1);
     backend.timeline.setClip(0, 0.0, 4.0);
     QTRY_COMPARE_WITH_TIMEOUT(editBar->property("zoomed").toBool(), false, 3000);
+}
+
+void BackendTests::qmlZoomFollowsPlayheadAndExitsImmediately() {
+    ShortcutBackend backend(placeholderUrl(m_dir), 60.0);
+    QmlHarness harness(backend);
+    QQuickWindow *window = showEditor(harness, backend);
+    QVERIFY2(window, qPrintable(mainQmlPath()));
+    QQuickItem *bar = harness.editBar();
+    backend.timeline.split(20.0);
+    backend.timeline.split(30.0);
+    for (int i = 0; i < 5; ++i)
+        QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 25.0, 3000);
+    QTest::keyClick(window, Qt::Key_Z);
+    QCOMPARE(bar->property("windowStart").toDouble(), 18.75);
+    QCOMPARE(bar->property("windowEnd").toDouble(), 31.25);
+    const double span = bar->property("windowLen").toDouble();
+
+    // Seeking beyond the original clip pans the view without changing scale.
+    QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
+    QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 35.0, 3000);
+    QVERIFY(bar->property("windowStart").toDouble() > 18.75);
+    QVERIFY(bar->property("windowEnd").toDouble() > playhead(harness));
+    QCOMPARE(bar->property("windowLen").toDouble(), span);
+    QTest::keyClick(window, Qt::Key_Z);
+    QCOMPARE(bar->property("zoomed").toBool(), false);
+    QCOMPARE(bar->property("windowStart").toDouble(), 0.0);
+    QCOMPARE(bar->property("windowEnd").toDouble(), 60.0);
+
+    // Large seeks, clip-edge jumps and playback updates follow in both
+    // directions, including the sequence's absolute start and end.
+    QTest::keyClick(window, Qt::Key_Z);
+    const double nextSpan = bar->property("windowLen").toDouble();
+    QTest::keyClick(window, Qt::Key_0);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+    QCOMPARE(bar->property("windowStart").toDouble(), 0.0);
+    QCOMPARE(bar->property("windowLen").toDouble(), nextSpan);
+    QTest::keyClick(window, Qt::Key_9);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 54.0, 3000);
+    QVERIFY(bar->property("windowStart").toDouble() <= 54.0);
+    QVERIFY(bar->property("windowEnd").toDouble() >= 54.0);
+    QTest::keyClick(window, Qt::Key_Tab);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 60.0, 3000);
+    QCOMPARE(bar->property("windowEnd").toDouble(), 60.0);
+    QCOMPARE(bar->property("windowLen").toDouble(), nextSpan);
+    bar->setProperty("playheadSec", 5.0);
+    QVERIFY(bar->property("windowStart").toDouble() < 5.0);
+    QVERIFY(bar->property("windowEnd").toDouble() > 5.0);
+    QCOMPARE(bar->property("windowLen").toDouble(), nextSpan);
+    QTest::keyClick(window, Qt::Key_Z);
+    QCOMPARE(bar->property("zoomed").toBool(), false);
+}
+
+void BackendTests::qmlZoomKeepsShortestClipsAtTenPercent() {
+    ShortcutBackend backend(placeholderUrl(m_dir), 100.0);
+    QmlHarness harness(backend);
+    QQuickWindow *window = showEditor(harness, backend);
+    QVERIFY2(window, qPrintable(mainQmlPath()));
+    QQuickItem *bar = harness.editBar();
+    backend.timeline.split(20.0);
+    backend.timeline.split(21.0);
+    QTest::keyClick(window, Qt::Key_5);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 50.0, 3000);
+    QTest::keyClick(window, Qt::Key_Z);
+    QTRY_VERIFY_WITH_TIMEOUT(bar->property("windowLen").toDouble() <= 10.0, 3000);
+    QVERIFY(bar->property("windowStart").toDouble() <= 50.0);
+    QVERIFY(bar->property("windowEnd").toDouble() >= 50.0);
+
+    // The one-second clip really spans at least 10% of the visible bar,
+    // including after following the playhead from a much longer clip.
+    QTest::keyClick(window, Qt::Key_2);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 20.0, 3000);
+    auto xForTime = [bar](double time) {
+        QVariant result;
+        QMetaObject::invokeMethod(bar, "xForTime", Q_RETURN_ARG(QVariant, result),
+                                  Q_ARG(QVariant, QVariant(time)));
+        return result.toDouble();
+    };
+    QVERIFY(xForTime(20.0) >= 0);
+    QVERIFY(xForTime(21.0) <= bar->width());
+    QVERIFY(xForTime(21.0) - xForTime(20.0) >= bar->width() * 0.1 - 0.001);
+
+    // Splitting creates shorter clips: the zoom adapts without another Z.
+    backend.timeline.split(20.5);
+    QTRY_VERIFY_WITH_TIMEOUT(bar->property("windowLen").toDouble() <= 5.0, 3000);
+    QVERIFY(xForTime(20.5) - xForTime(20.0) >= bar->width() * 0.1 - 0.001);
+    backend.timeline.removeClip(2);
+    backend.timeline.removeClip(1);
+    QTRY_VERIFY_WITH_TIMEOUT(bar->property("windowLen").toDouble() > 10.0, 3000);
+    QVERIFY(bar->property("zoomed").toBool());
+    QTest::keyClick(window, Qt::Key_Z);
+    QCOMPARE(bar->property("zoomed").toBool(), false);
+    QCOMPARE(bar->property("windowEnd").toDouble(), backend.timeline.duration());
 }
 
 void BackendTests::qmlPressingHandleScrubsItsFrame() {
@@ -1612,7 +1866,7 @@ void BackendTests::qmlOpenConfirmsUnexportedEdit() {
 
     // Trim the video, making the work unexported.
     QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
-    QTest::keyClick(window, Qt::Key_Space, Qt::ControlModifier);
+    backend.timeline.trimTo(playhead(harness), true);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 5.0, 20.0}}), 3000);
     QTRY_COMPARE_WITH_TIMEOUT(window->property("unexported").toBool(), true, 3000);
 
@@ -1689,7 +1943,7 @@ void BackendTests::qmlQuitConfirmsUnexportedEdit() {
 
     // Trim the video, making the work unexported: Q now asks instead of quitting.
     QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
-    QTest::keyClick(window, Qt::Key_Space, Qt::ControlModifier);
+    backend.timeline.trimTo(playhead(harness), true);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 5.0, 20.0}}), 3000);
     QTRY_COMPARE_WITH_TIMEOUT(window->property("unexported").toBool(), true, 3000);
 
@@ -1739,7 +1993,7 @@ void BackendTests::qmlQuitConfirmsUnexportedEdit() {
     backend.announceExportDone();
     QTRY_COMPARE_WITH_TIMEOUT(window->property("unexported").toBool(), false, 3000);
     QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
-    QTest::keyClick(window, Qt::Key_Space, Qt::AltModifier);
+    backend.timeline.trimTo(playhead(harness), false);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 5.0, 15.0}}), 3000);
     QTRY_COMPARE_WITH_TIMEOUT(window->property("unexported").toBool(), true, 3000);
 

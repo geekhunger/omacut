@@ -6,6 +6,7 @@ TEMPLATE = app
 INCLUDEPATH += ../src
 
 HEADERS += \
+    ../src/clipmovekeys.h \
     ../src/backend.h \
     ../src/edit.h \
     ../src/ffmpeg.h \

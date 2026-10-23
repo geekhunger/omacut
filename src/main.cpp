@@ -11,6 +11,7 @@
 #include <functional>
 
 #include "backend.h"
+#include "clipmovekeys.h"
 #include "thumbprovider.h"
 
 class OmacutApplication : public QGuiApplication {
@@ -38,7 +39,7 @@ int main(int argc, char *argv[]) {
 
     OmacutApplication app(argc, argv);
     app.setApplicationName("omacut");
-    app.setApplicationVersion("0.7.2");
+    app.setApplicationVersion("0.7.3");
 
     // Associates the window with omacut.desktop so the compositor (Wayland app_id
     // = this name) and taskbars pick up our installed icon.
@@ -61,6 +62,7 @@ int main(int argc, char *argv[]) {
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return -1;
+    new ClipMoveKeys(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));
 
     app.openFile = [&engine](const QUrl &url) {
         // Use the existing drop workflow, preserving any current edit.

@@ -1,4 +1,4 @@
-Omacut 0.7.2 - macOS community build
+Omacut 0.7.3 - macOS community build
 https://github.com/geekhunger/omacut
 
 Requirements: Apple Silicon Mac (arm64), macOS 26 or later.

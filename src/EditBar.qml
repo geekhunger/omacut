@@ -15,18 +15,33 @@ Item {
     readonly property var clips: timeline.clips
     readonly property real durationSec: timeline.duration
     property real playheadSec: 0
+    // Preserve which side of a shared edge the keyboard preview belongs to.
+    property int edgeClip: -1
     property color accent: "#FFD60A"
     property color accentForeground: "black"
     property bool zoomed: false
-    // Frozen at zoom time, so the view doesn't shift under an edit.
+    // Keep the zoom scale while following the playhead through the sequence.
     property real viewStartSec: 0
     property real viewEndSec: 0
+    property real preferredZoomSpan: 0
+    // Every complete clip occupies at least 10% of the zoomed viewport.
+    readonly property real zoomSpanLimit: {
+        var shortest = Infinity
+        for (var i = 0; i < clips.length; ++i) {
+            var length = clips[i].out - clips[i].in
+            if (length > 0) shortest = Math.min(shortest, length)
+        }
+        return shortest * 10
+    }
+    onZoomSpanLimitChanged: Qt.callLater(resizeZoom)
+    onPlayheadSecChanged: followPlayhead()
+    onInteractingChanged: if (!interacting) { resizeZoom(); followPlayhead() }
     // An edit that ends before the zoomed view would leave the bar empty, so
     // it zooms back out. Mid-trim the length changes live; that waits for the drop.
     function unzoomIfPast() {
         if (zoomed && durationSec <= viewStartSec) zoomed = false
     }
-    onDurationSecChanged: if (!trimming) unzoomIfPast()
+    onDurationSecChanged: if (!trimming) { unzoomIfPast(); Qt.callLater(resizeZoom) }
     // Something is being dragged, so playback must not move the playhead.
     readonly property bool interacting: area.mode !== 0
     readonly property bool trimming: area.mode === 1
@@ -85,15 +100,48 @@ Item {
         if (width <= 0 || durationSec <= 0) return 0
         return windowStart + Math.max(0, Math.min(1, x / width)) * windowLen
     }
-    // Z frames the clip under the playhead with some slack; again zooms out.
-    // If the clip changed since the last zoom, Z zooms again on it instead.
+    // Recalculate after edits in either direction, keeping the playhead at
+    // the same relative position when the shortest clip changes length.
+    function resizeZoom() {
+        if (!zoomed || trimming || area.mode === 4 || durationSec <= 0) return
+        var oldSpan = viewEndSec - viewStartSec
+        var span = Math.min(preferredZoomSpan, zoomSpanLimit, durationSec)
+        if (span <= 0 || Math.abs(span - oldSpan) < 0.000001) return
+        var fraction = oldSpan > 0 ? (playheadSec - viewStartSec) / oldSpan : 0.5
+        fraction = Math.max(0.1, Math.min(0.9, fraction))
+        var start = Math.max(0, Math.min(playheadSec - span * fraction, durationSec - span))
+        viewStartSec = start
+        viewEndSec = start + span
+    }
+    // Pan with a little room ahead, preserving the zoom scale. Handle and
+    // clip drags keep their coordinate system until they are released.
+    function followPlayhead() {
+        if (!zoomed || trimming || area.mode === 4 || durationSec <= 0) return
+        var span = Math.min(durationSec, zoomSpanLimit, viewEndSec - viewStartSec)
+        if (span <= 0) return
+        var margin = span / 10
+        var start = viewStartSec
+        if (playheadSec < start + margin) start = playheadSec - margin
+        else if (playheadSec > start + span - margin) start = playheadSec - span + margin
+        start = Math.max(0, Math.min(start, durationSec - span))
+        viewStartSec = start
+        viewEndSec = start + span
+    }
+    // Z always toggles between the current clip and the whole sequence.
     function toggleZoom() {
+        if (zoomed) { zoomed = false; return }
         if (durationSec <= 0) return
         var clip = clips[timeline.clipAt(playheadSec)]
         var slack = (clip.end - clip.start) / 8
-        var newStart = Math.max(0, clip.start - slack), newEnd = Math.min(durationSec, clip.end + slack)
-        if (zoomed && newStart === viewStartSec && newEnd === viewEndSec) zoomed = false
-        else { viewStartSec = newStart; viewEndSec = newEnd; zoomed = true }
+        var start = Math.max(0, clip.start - slack)
+        var end = Math.min(durationSec, clip.end + slack)
+        preferredZoomSpan = end - start
+        var span = Math.min(preferredZoomSpan, zoomSpanLimit)
+        if (span < preferredZoomSpan)
+            start = Math.max(0, Math.min(playheadSec - span / 2, durationSec - span))
+        viewStartSec = start
+        viewEndSec = start + span
+        zoomed = true
     }
     // Seconds of source per filmstrip frame: frames about as wide as they are
     // tall at 16:9, on a fixed ladder of steps so frames stay cached across
@@ -207,7 +255,7 @@ Item {
                 }
                 var px = root.xForTime(root.playheadSec) - 1
                 // Read before the clip list catches up with an edit, it can be missing.
-                var clip = root.clips[root.timeline.clipAt(root.playheadSec)]
+                var clip = root.clips[root.edgeClip >= 0 ? root.edgeClip : root.timeline.clipAt(root.playheadSec)]
                 if (clip) {
                     var from = Math.round(root.xForTime(clip.start)) + root.handleW
                     var to = Math.round(root.xForTime(clip.end)) - root.handleW - width
@@ -246,7 +294,7 @@ Item {
 
     Timer {
         id: hold
-        interval: 350
+        interval: 220
         onTriggered: area.pickUp()
     }
 

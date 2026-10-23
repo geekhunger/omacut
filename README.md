@@ -14,7 +14,7 @@ This fork adds a native macOS application to [omacom/omacut](https://github.com/
 
 ### Install on macOS
 
-Download `Omacut-0.7.2-macos-arm64.zip` from Releases, unzip it and drag `Omacut.app`
+Download `Omacut-0.7.3-macos-arm64.zip` from Releases, unzip it and drag `Omacut.app`
 to Applications. Alternatively, open the DMG and drag the app to Applications.
 
 This build is ad-hoc signed, **not Apple Developer ID signed or notarized**.
@@ -59,7 +59,7 @@ A dead-simple video editor. Open a video, trim either end, split it into clips a
 
 Built using **Qt Quick (QML)** UI with the Material style — the same Qt stack Quickshell builds on — and **ffmpeg** for the cut. The C++ side compiles to a single executable; the QML is embedded in it via Qt resources.
 
-<img width="3227" height="3227" alt="screenshot-2026-06-23_15-20-40" src="https://github.com/user-attachments/assets/c76047c8-618f-4c1c-91f9-e7024c4f953b" />
+![Omacut for macOS](docs/images/omacut-macos.jpg)
 
 ## Editing
 
@@ -76,13 +76,10 @@ Handles catch on neighbouring clip edges and the playhead.
 
 ## Hotkeys
 
-These bindings describe the latest local macOS build. The published
-[`v0.7.2-macos.1` download](https://github.com/geekhunger/omacut/releases/tag/v0.7.2-macos.1)
-still uses `[` / `]` for clip edges and `Alt+[` / `Alt+]` for moving clips,
-and has the original zoom behavior.
+These bindings are included in the
+[`v0.7.3-macos.1` macOS release](https://github.com/geekhunger/omacut/releases/tag/v0.7.3-macos.1).
 
-On macOS, read `Ctrl` below as **Command (⌘)** and `Alt` as **Option (⌥)**.
-This follows [Qt's shortcut notation](https://doc.qt.io/qt-6/qkeysequence.html#details).
+`Cmd` means **Command (⌘)**; `Alt` means **Option (⌥)**.
 
 - `Space`: Start/pause video playback.
 - `1`–`9`: Jump to 10%–90% of the whole edit.
@@ -96,22 +93,20 @@ This follows [Qt's shortcut notation](https://doc.qt.io/qt-6/qkeysequence.html#d
 - `X`, `Delete` or `Backspace`: Remove the clip under the playhead.
 - `-`, `−`, `–` or `—`: Move the current clip one position earlier, keeping the playhead on the same frame of that clip.
 - `+`: Move the current clip one position later, keeping the playhead on the same frame of that clip.
-- `Ctrl+Space`: Move the current clip's start to the playhead.
-- `Alt+Space`: Move the current clip's end to the playhead.
-- `Ctrl+Z`: Undo.
-- `Ctrl+Shift+Z` or `Ctrl+Y`: Redo.
+- `Cmd+Z`: Undo.
+- `Cmd+Shift+Z` or `Cmd+Y`: Redo.
 - `Z`: Zoom into the clip at the playhead; press again to show the whole edit immediately. The view follows the playhead and adapts to edits so the shortest clip spans at least 10% of the visible timeline.
 - `F`: Save the frame under the playhead as a PNG next to its video.
-- `Ctrl+O`: Open a new video; ask first if the current edit has unexported changes.
-- `Ctrl+Shift+O`: Add a video after the clip under the playhead.
-- `Ctrl+S`: Export the current edit.
+- `Cmd+O`: Open a new video; ask first if the current edit has unexported changes.
+- `Cmd+Shift+O`: Add a video after the clip under the playhead.
+- `Cmd+S`: Export the current edit.
 - `Q`: Quit; ask first if the edit has unexported changes.
 - `?`: Toggle the shortcut help overlay.
 - `Escape`: Dismiss the quit confirmation, open confirmation or shortcut help overlay.
 
 Clip-move shortcuts follow the character typed by the active keyboard layout,
 including numeric-keypad `+` / `-` and Option combinations that produce `–` or `—`.
-Command/Control combinations keep their own meanings.
+Cmd combinations keep their own meanings.
 
 ## Install
 
@@ -152,10 +147,11 @@ MIT. See `LICENSE`.
 ## Customizations
 
 Compared with [the original Omacut](https://github.com/omacom/omacut) at upstream
-commit `612215e2f7f0856ec48fdcaff73bd22d4be7899f`, this fork and its latest local
-macOS build contain the following customizations.
+commit `612215e2f7f0856ec48fdcaff73bd22d4be7899f`, this fork contains the following
+customizations. They are included in the
+`v0.7.3-macos.1` source tag and macOS downloads.
 
-### Published macOS port and release tooling
+### macOS port and release tooling
 
 - **Native macOS application:** Added a Qt `.app` bundle with an application icon, bundle metadata, version information and Finder video-file associations. The published binary targets Apple Silicon and macOS 26 or later.
 - **Native file dialogs:** Added macOS open/save panels using AppKit and Uniform Type Identifiers. The save panel exposes Omacut's Original/1080p/720p export choices where applicable; the upstream export-size behavior is preserved.
@@ -167,21 +163,19 @@ macOS build contain the following customizations.
 - **Signing and distribution:** Added local ad-hoc signing and strict signature verification, installation/first-launch instructions, build information, test results and SHA-256 checksums. The community build is not Developer ID signed or notarized.
 - **Third-party sources and notices:** Added dependency-version/source manifests, checksum-verified source collection, Homebrew build formulas and patches, Qt SPDX metadata and bundled license notices. Omacut's own source retains its MIT license.
 - **Build and test support:** Added macOS Objective-C++ sources and Apple frameworks to the qmake projects, taught the test runner to launch its macOS `.app` executable and forward arguments, corrected the build output path, and added packaging/release scripts plus generated-artifact ignore rules.
+- **Documentation:** Added a macOS screenshot, the complete Mac shortcut reference and this inventory of changes from upstream.
 
-### Latest local editing customizations
-
-These changes are present in the current local app and source tree. They are
-not included in the published `v0.7.2-macos.1` source tag or app downloads yet.
+### Editing customizations
 
 - **Clip-edge navigation:** Replaced `[` / `]` with `Shift+Tab` / `Tab`. Repeated presses traverse clip in/out points; reversing direction visits the other edge of the same clip first. An out-point preview stays on that clip's last frame rather than switching to the next clip.
 - **Clip movement:** Replaced `Alt+[` / `Alt+]` with minus/dash characters and `+`. Moving preserves the selected clip, its preview frame and its in/out-edge association, including repeated moves and reversing direction at the sequence boundaries.
-- **Keyboard-layout handling:** Added character-based clip-move detection for `+`, `-`, `−`, `–` and `—`, numeric-keypad keys and macOS Option-generated dashes. Physical key codes no longer override the character actually typed; Command/Control shortcuts remain separate.
-- **Number-key handling and help:** Made `0` a dedicated jump-to-start shortcut, retained `1`–`9` for 10%–90% jumps, and updated the in-app help for the revised navigation and movement keys.
+- **Keyboard-layout handling:** Added character-based clip-move detection for `+`, `-`, `−`, `–` and `—`, numeric-keypad keys and macOS Option-generated dashes. Physical key codes no longer override the character actually typed; Cmd shortcuts remain separate.
+- **Keyboard controls and help:** Removed the two modifier-plus-Space trim shortcuts and switched the macOS help/README labels to `Cmd`. Made `0` a dedicated jump-to-start shortcut, retained `1`–`9` for 10%–90% jumps, and updated the in-app help for the revised navigation and movement keys.
 - **Zoom toggle:** Changed `Z` so a second press always returns immediately to the whole edit, including after trimming or moving to a different clip.
 - **Zoom that follows editing:** Added automatic panning with the playhead during seeking, playback and clip-edge navigation. The zoom adapts when clip lengths change so the shortest clip spans at least 10% of the visible timeline, while preserving stable coordinates during handle/clip drags.
 - **Faster clip dragging:** Reduced the hold delay before picking up a clip from 350 ms to 220 ms.
 - **Regression coverage:** Added and updated tests for Tab navigation and edge previews, clip movement at in/out points and sequence bounds, typed-character/keypad/dash handling, number jumps, zoom following and minimum visible clip size.
 
-### Local app-update tooling
+### App-update tooling
 
-- Added a staged installer for rebuilt executables: reuse the deployed app's bundled libraries, correct restored Homebrew load paths, re-sign and verify the staged bundle, preserve the previous app in a dated backup, and restore it if installation verification fails. This installer currently lives in the local source tree.
+- Added a staged installer for rebuilt executables: reuse the deployed app's bundled libraries, correct restored Homebrew load paths, re-sign and verify the staged bundle, preserve the previous app in a dated backup, and restore it if installation verification fails. The installer is included as `packaging/install-macos.py`.

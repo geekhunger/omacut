@@ -95,6 +95,7 @@ ApplicationWindow {
     function togglePlay() {
         if (!win.hasVideo || timeline.duration <= 0)
             return;
+        edgeClip = -1;
         ensureAudioOutput();
         if (playing()) {
             player.pause();
@@ -109,20 +110,57 @@ ApplicationWindow {
     function seekTo(seconds) {
         if (!win.hasVideo || timeline.duration <= 0)
             return;
+        edgeClip = -1;
         var t = Math.max(0, Math.min(seconds, timeline.duration));
         var i = timeline.clipAt(t), clip = timeline.clips[i];
         editBar.playheadSec = t;
         player.show(i, clip.in + t - clip.start, playing());
     }
+    // A shared boundary is both one clip's out and the next clip's in.
+    // Retain the clip we showed so reversing direction stays on that clip.
+    property int edgeClip: -1
+    property int edgeDirection: 0
+    function jumpToClipEdge(direction) {
+        if (!win.hasVideo || timeline.duration <= 0)
+            return;
+        var i = edgeClip >= 0 ? edgeClip : timeline.clipAt(editBar.playheadSec);
+        if (edgeClip >= 0 && edgeDirection === direction)
+            i = Math.max(0, Math.min(i + direction, timeline.clips.length - 1));
+        player.pause();
+        player.finishPriming();
+        edgeClip = i;
+        edgeDirection = direction;
+        var clip = timeline.clips[i];
+        editBar.playheadSec = direction > 0 ? clip.end : clip.start;
+        // The out point is exclusive: preview this clip's last frame rather
+        // than the following clip's first frame, as when dragging its handle.
+        var sourceTime = direction > 0 ? Math.max(clip.in, clip.out - 0.001) : clip.in;
+        player.show(i, sourceTime, false);
+    }
     // Moves the clip under the playhead one place earlier or later, keeping
     // the playhead on the same frame of it.
     function moveClipBy(direction) {
-        var t = editBar.playheadSec, i = timeline.clipAt(t);
+        var atEdge = edgeClip >= 0;
+        var oldEdgeDirection = edgeDirection;
+        var t = editBar.playheadSec, i = atEdge ? edgeClip : timeline.clipAt(t);
         var into = t - timeline.clipStart(i);
-        if (i + direction < 0 || i + direction >= timeline.clips.length)
+        var target = i + direction;
+        if (i < 0 || target < 0 || target >= timeline.clips.length)
             return;
-        timeline.moveClip(i, i + direction);
-        seekTo(timeline.clipStart(i + direction) + into);
+        timeline.moveClip(i, target);
+        if (atEdge) {
+            // An out point belongs to the previewed clip even though clipAt
+            // assigns its time to the following clip. Keep that association
+            // through the move, including for the next +/- or Tab press.
+            edgeClip = target;
+            edgeDirection = oldEdgeDirection;
+            var clip = timeline.clips[target];
+            editBar.playheadSec = clip.start + into;
+            var sourceTime = oldEdgeDirection > 0 ? Math.max(clip.in, clip.out - 0.001) : clip.in;
+            player.show(target, sourceTime, false);
+        } else {
+            seekTo(timeline.clipStart(target) + into);
+        }
     }
     property bool quitting: false
     function requestQuit() {
@@ -177,18 +215,26 @@ ApplicationWindow {
     // The playback and editing shortcuts go quiet while the quit confirmation is
     // up — a disabled Shortcut also stops swallowing its key, which lets the
     // dialog's own keyboard navigation receive the arrows, Space and Enter.
-    // 0-9 jump to 0%-90% of the whole edit.
+    // Digits 1-9 select 10%-90% of the whole edit; 0 returns to its start.
     Instantiator {
-        model: 10
+        model: [1, 2, 3, 4, 5, 6, 7, 8, 9]
         delegate: Shortcut {
-            required property int index
-            sequence: index.toString()
+            required property int modelData
+            sequence: modelData.toString()
             context: Qt.ApplicationShortcut
             enabled: win.editing
             // Held down, repeats would keep seeking to the same spot.
             autoRepeat: false
-            onActivated: seekTo(timeline.duration * index / 10)
+            onActivated: seekTo(timeline.duration * modelData / 10)
         }
+    }
+
+    Shortcut {
+        sequence: "0"
+        context: Qt.ApplicationShortcut
+        enabled: win.editing
+        autoRepeat: false
+        onActivated: seekTo(0)
     }
 
     Shortcut {
@@ -241,37 +287,17 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "["
+        sequence: "Shift+Tab"
         context: Qt.ApplicationShortcut
         enabled: win.editing
-        onActivated: {
-            player.pause();
-            seekTo(timeline.edgeFrom(editBar.playheadSec, -1));
-        }
+        onActivated: jumpToClipEdge(-1)
     }
 
     Shortcut {
-        sequence: "]"
+        sequence: "Tab"
         context: Qt.ApplicationShortcut
         enabled: win.editing
-        onActivated: {
-            player.pause();
-            seekTo(timeline.edgeFrom(editBar.playheadSec, 1));
-        }
-    }
-
-    Shortcut {
-        sequence: "Alt+["
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        onActivated: moveClipBy(-1)
-    }
-
-    Shortcut {
-        sequence: "Alt+]"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        onActivated: moveClipBy(1)
+        onActivated: jumpToClipEdge(1)
     }
 
     Shortcut {
@@ -288,22 +314,6 @@ ApplicationWindow {
         autoRepeat: false
         enabled: win.editing
         onActivated: timeline.removeAt(editBar.playheadSec)
-    }
-
-    Shortcut {
-        sequence: "Ctrl+Space"
-        context: Qt.ApplicationShortcut
-        autoRepeat: false
-        enabled: win.editing
-        onActivated: timeline.trimTo(editBar.playheadSec, true)
-    }
-
-    Shortcut {
-        sequence: "Alt+Space"
-        context: Qt.ApplicationShortcut
-        autoRepeat: false
-        enabled: win.editing
-        onActivated: timeline.trimTo(editBar.playheadSec, false)
     }
 
     Shortcut {
@@ -393,6 +403,7 @@ ApplicationWindow {
 
     MediaPlayer {
         id: player
+        objectName: "player"
         videoOutput: videoOut
         audioOutput: win.audioOutput
 
@@ -491,6 +502,8 @@ ApplicationWindow {
             }
             if (pendingMs >= 0 || clip < 0 || clip >= timeline.clips.length)
                 return;
+            if (win.edgeClip >= 0)
+                return;
             var c = timeline.clips[clip], t = player.position / 1000;
             // Play the clips in order: carry on into a clip that continues
             // this one, jump to any other, and stop after the last.
@@ -518,11 +531,12 @@ ApplicationWindow {
     Connections {
         target: win.timeline
         function onChanged() {
+            win.edgeClip = -1;
             Qt.callLater(win.resync);
         }
     }
     function resync() {
-        if (!hasVideo || timeline.duration <= 0 || editBar.interacting)
+        if (!hasVideo || timeline.duration <= 0 || editBar.interacting || edgeClip >= 0)
             return;
         var t = Math.min(editBar.playheadSec, timeline.duration);
         var i = timeline.clipAt(t), clip = timeline.clips[i];
@@ -784,11 +798,13 @@ ApplicationWindow {
                 enabled: !backend.probing
                 accent: win.accent
                 accentForeground: win.accentForeground
+                edgeClip: win.edgeClip
                 onScrub: (seconds) => {
                     player.pause();
                     seekTo(seconds);
                 }
                 onScrubClip: (index, sourceTime) => {
+                    win.edgeClip = -1;
                     player.pause();
                     player.show(index, sourceTime, false);
                 }
@@ -943,22 +959,23 @@ ApplicationWindow {
                 Repeater {
                     model: [
                         { keys: "Space", action: "Play / pause" },
-                        { keys: "0–9", action: "Jump to 0%–90% of the edit" },
+                        { keys: "1–9", action: "Jump to 10%–90% of the edit" },
+                        { keys: "0", action: "Jump to the start" },
                         { keys: "← / →", action: "Move playhead 1s" },
                         { keys: "Shift ← / →", action: "Move playhead 5s" },
                         { keys: "Alt ← / →", action: "Move playhead 0.2s" },
-                        { keys: "[ / ]", action: "Previous / next clip edge" },
+                        { keys: "Tab", action: "Clip out; repeat for next clip" },
+                        { keys: "Shift Tab", action: "Clip in; repeat for previous clip" },
                         { keys: "S", action: "Split the clip at the playhead" },
                         { keys: "X", action: "Remove the clip" },
-                        { keys: "Alt [ / ]", action: "Move the clip earlier / later" },
-                        { keys: "Ctrl Space", action: "Clip start to playhead" },
-                        { keys: "Alt Space", action: "Clip end to playhead" },
-                        { keys: "Ctrl Z", action: "Undo (Ctrl Shift Z redo)" },
+                        { keys: "- / – / —", action: "Move the clip earlier" },
+                        { keys: "+", action: "Move the clip later" },
+                        { keys: "Cmd Z", action: "Undo (Cmd Shift Z redo)" },
                         { keys: "Z", action: "Zoom to the clip" },
                         { keys: "F", action: "Save the playhead frame as a PNG" },
-                        { keys: "Ctrl O", action: "Open a video" },
-                        { keys: "Ctrl Shift O", action: "Add a video after this clip" },
-                        { keys: "Ctrl S", action: "Export" },
+                        { keys: "Cmd O", action: "Open a video" },
+                        { keys: "Cmd Shift O", action: "Add a video after this clip" },
+                        { keys: "Cmd S", action: "Export" },
                         { keys: "Q", action: "Quit" },
                         { keys: "?", action: "Show these shortcuts" }
                     ]
@@ -1147,6 +1164,7 @@ ApplicationWindow {
     Connections {
         target: backend
         function onInfoChanged() {
+            win.edgeClip = -1;
             win.noticeText = "";
             noticeTimer.stop();
             // Drop any prime or load still pending for the last video.
