@@ -612,6 +612,10 @@ void Backend::exportClips(const QUrl &dst, const edit::Clips &clips, int scaleHe
                     failExport(tmpPath, QStringLiteral("Could not write the exported file."));
                     return;
                 }
+                // Some FFmpeg versions report a final timestamp below the
+                // duration (or zero for a short buffered export). Completion
+                // is certain after a successful process and atomic replace.
+                setStatus(QStringLiteral("Exporting 100%"));
                 setBusy(false);
                 setStatus(QString());
                 // Written over one of its own videos: the clips' times point

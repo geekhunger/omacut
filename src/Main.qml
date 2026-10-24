@@ -548,7 +548,10 @@ ApplicationWindow {
         return [];
     }
     function shortcutDisplay(sequence) {
-        return sequence.replace(/Ctrl\+/g, "Cmd+").replace(/Meta\+/g, "Ctrl+")
+        var platformSequence = Qt.platform.os === "osx"
+            ? sequence.replace(/Ctrl\+/g, "Cmd+").replace(/Meta\+/g, "Ctrl+")
+            : sequence;
+        return platformSequence
             .replace(/Left/g, "←").replace(/Right/g, "→")
             .replace(/^Del$/, "Delete").replace(/^Esc$/, "Escape");
     }

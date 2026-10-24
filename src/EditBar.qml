@@ -159,13 +159,19 @@ Item {
         radius: root.frameRadius - root.frameW; color: root.film
     }
 
-    component Handle: Rectangle {
+    component Handle: Item {
         property bool leading: true
         x: leading ? 0 : parent.width - width
         width: Math.min(root.handleW, parent.width / 2); height: parent.height
-        topLeftRadius: leading ? root.frameRadius : 0; bottomLeftRadius: topLeftRadius
-        topRightRadius: leading ? 0 : root.frameRadius; bottomRightRadius: topRightRadius
-        color: root.accent
+        // Clip the inner half of a rounded rectangle to keep only the outer
+        // corners rounded. Individual corner radii require Qt 6.7; this also
+        // renders on Ubuntu 24.04's Qt 6.4 without changing the handle shape.
+        clip: true
+        Rectangle {
+            x: parent.leading ? 0 : -root.frameRadius
+            width: parent.width + root.frameRadius; height: parent.height
+            radius: root.frameRadius; color: root.accent
+        }
         Rectangle { anchors.centerIn: parent; width: 2; height: 16; radius: 1; color: root.film }
     }
 

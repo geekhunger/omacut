@@ -2,6 +2,7 @@
 #include "backend.h"
 #include "ffmpeg.h"
 #include <QCoreApplication>
+#include <QDebug>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -39,6 +40,9 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
         s->finished = true;
         s->result.insert("ok", error.isEmpty());
         s->result.insert("error", error);
+        s->result.insert("inputProbed", s->loaded);
+        s->result.insert("previewFrameDecoded", s->preview);
+        s->result.insert("exportStarted", s->exporting);
         const QByteArray json = QJsonDocument(s->result).toJson();
         QSaveFile report(s->report);
         const bool saved = report.open(QIODevice::WriteOnly) && report.write(json) == json.size()
@@ -50,6 +54,7 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
     auto beginExport = [s, &backend, finish] {
         if (!s->loaded || !s->preview || s->exporting || s->finished) return;
         s->exporting = true;
+        qInfo("Smoke: trimming, splitting, moving and exporting");
         auto *timeline = backend.timeline();
         const double duration = timeline->duration();
         if (duration < 0.8) { finish("Input must be at least 0.8 seconds long"); return; }
@@ -65,10 +70,15 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
     };
     QObject::connect(&backend, &Backend::loadError, &engine, [finish](const QString &e) { finish(e); });
     QObject::connect(&backend, &Backend::exportFailed, &engine, [finish](const QString &e) { finish(e); });
-    QObject::connect(&backend, &Backend::infoChanged, &engine, [s, &backend, beginExport] {
+    QObject::connect(&backend, &Backend::infoChanged, &engine, [s, &backend, &engine, beginExport] {
         if (s->loaded || backend.timeline()->duration() <= 0) return;
         s->loaded = true;
+        qInfo("Smoke: input probe completed");
         s->result.insert("inputProbed", true);
+        // Exercise normal playback as well as the first-frame priming path.
+        QTimer::singleShot(100, &engine, [&engine] {
+            QMetaObject::invokeMethod(engine.rootObjects().first(), "togglePlay");
+        });
         beginExport();
     });
     QObject::connect(&backend, &Backend::exportDone, &engine, [s, finish](const QString &path) {
@@ -89,6 +99,7 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
                          [s, beginExport](const QVideoFrame &frame) {
             if (!frame.isValid() || s->preview) return;
             s->preview = true;
+            qInfo("Smoke: preview frame decoded");
             s->result.insert("previewFrameDecoded", true);
             QTimer::singleShot(0, QCoreApplication::instance(), beginExport);
         });

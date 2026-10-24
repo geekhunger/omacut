@@ -918,7 +918,8 @@ void BackendTests::exportClipWritesMp4() {
 
     QCOMPARE(failedSpy.count(), 0);
 
-    // ffmpeg's -progress stream drove the status to a completed percentage.
+    // Successful export always reaches 100%, including FFmpeg versions whose
+    // final progress timestamp falls short of the duration.
     QVERIFY2(statuses.contains(QStringLiteral("Exporting 100%")),
              qPrintable(statuses.join(QStringLiteral(" | "))));
     QCOMPARE(doneSpy.count(), 1);
