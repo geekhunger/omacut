@@ -12,6 +12,7 @@
 
 #include "backend.h"
 #include "clipmovekeys.h"
+#include "shortcutsettings.h"
 #include "thumbprovider.h"
 
 class OmacutApplication : public QGuiApplication {
@@ -52,12 +53,14 @@ int main(int argc, char *argv[]) {
     auto *provider = new ThumbProvider();
     Backend backend(provider, &app);
 
+    ShortcutSettings shortcutStore;
     QQmlApplicationEngine engine;
 
     // The engine takes ownership of the image provider.
     engine.addImageProvider("thumbs", provider);
 
     engine.rootContext()->setContextProperty("backend", &backend);
+    engine.rootContext()->setContextProperty("shortcutStore", &shortcutStore);
 
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())

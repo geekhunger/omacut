@@ -6,6 +6,7 @@ TEMPLATE = app
 INCLUDEPATH += ../src
 
 HEADERS += \
+    ../src/shortcutsettings.h \
     ../src/clipmovekeys.h \
     ../src/backend.h \
     ../src/edit.h \

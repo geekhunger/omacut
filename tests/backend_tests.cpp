@@ -23,10 +23,12 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <memory>
 
 #include "backend.h"
 #include "clipmovekeys.h"
+#include "shortcutsettings.h"
 #include "filepicker.h"
 #include "portalfilepicker.h"
 #include "thumbprovider.h"
@@ -231,9 +233,12 @@ static QString mainQmlPath() {
 // as the window is in use, so each shortcut test is just the key presses.
 class QmlHarness {
 public:
-    explicit QmlHarness(QObject &backend) {
+    explicit QmlHarness(QObject &backend, const QString &settingsFile = {}) {
+        m_shortcutStore = std::make_unique<ShortcutSettings>(
+            settingsFile.isEmpty() ? m_settingsDir.filePath(QStringLiteral("shortcuts.ini")) : settingsFile);
         m_engine.addImageProvider(QStringLiteral("thumbs"), new ThumbProvider);
         m_engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        m_engine.rootContext()->setContextProperty(QStringLiteral("shortcutStore"), m_shortcutStore.get());
         m_engine.load(QUrl::fromLocalFile(mainQmlPath()));
         if (!m_engine.rootObjects().isEmpty())
             m_window = qobject_cast<QQuickWindow *>(m_engine.rootObjects().first());
@@ -248,6 +253,8 @@ public:
     }
 
 private:
+    QTemporaryDir m_settingsDir;
+    std::unique_ptr<ShortcutSettings> m_shortcutStore;
     QQmlApplicationEngine m_engine;
     QQuickWindow *m_window = nullptr;
 };
@@ -308,6 +315,11 @@ private slots:
     void qmlQuitConfirmsUnexportedEdit();
     void qmlOpenConfirmsUnexportedEdit();
     void qmlHelpOverlayBlocksEditingKeys();
+    void qmlHelpClosesWithXOrButtonAndIgnoresOutsideClicks();
+    void qmlShortcutRecordingReplacesOneAliasAndPersists();
+    void qmlShortcutAlternativesCanBeAddedAndAllRemoved();
+    void qmlJumpEndStartsUnboundAndCanBeConfigured();
+    void qmlShortcutCaptureCancelsOutsideAndKeepsBindings();
     void timelineSplitsTrimsAndJoins();
     void timelineUndoesAGestureAsOneStep();
     void timelineTracksUnexportedCuts();
@@ -1398,11 +1410,13 @@ void BackendTests::qmlBracketKeysSetTheClipEdges() {
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 15.0, 3000);
     QTest::keyClick(window, Qt::Key_BracketRight);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 0.0, 15.0}}), 3000);
+    QCOMPARE(playhead(harness), 15.0);
     QTest::keyClick(window, Qt::Key_Left, Qt::ShiftModifier);
     QTest::keyClick(window, Qt::Key_Left, Qt::ShiftModifier);
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
     QTest::keyClick(window, Qt::Key_BracketLeft);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 5.0, 15.0}}), 3000);
+    QCOMPARE(playhead(harness), 0.0);
 
     // German macOS layouts type brackets with Option+5/6. Their characters
     // must trim, without activating the number-key seeking shortcuts.
@@ -1417,6 +1431,7 @@ void BackendTests::qmlBracketKeysSetTheClipEdges() {
     QKeyEvent in(QEvent::KeyPress, Qt::Key_5, Qt::AltModifier, QStringLiteral("["));
     QCoreApplication::sendEvent(window, &in);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 10.0, 20.0}}), 3000);
+    QCOMPARE(playhead(harness), 0.0);
     QTest::keyClick(window, Qt::Key_5);
     QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 5.0, 3000);
     QKeyEvent out(QEvent::KeyPress, Qt::Key_6, Qt::AltModifier, QStringLiteral("]"));
@@ -1428,6 +1443,30 @@ void BackendTests::qmlBracketKeysSetTheClipEdges() {
     window->setProperty("helpVisible", true);
     QCoreApplication::sendEvent(window, &in);
     QCOMPARE(backend.timeline.clips(), (edit::Clips{{0, 10.0, 15.0}}));
+
+    // With neighbours on both sides, retain the edited clip at the shared
+    // boundary and move the playhead to its new in/out marker.
+    window->setProperty("helpVisible", false);
+    backend.timeline.reset(20.0);
+    backend.timeline.split(5.0);
+    backend.timeline.split(15.0);
+    QTest::keyClick(window, Qt::Key_5);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 10.0, 3000);
+    QTest::keyClick(window, Qt::Key_BracketLeft);
+    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
+        (edit::Clips{{0, 0.0, 5.0}, {0, 10.0, 15.0}, {0, 15.0, 20.0}}), 3000);
+    QCOMPARE(playhead(harness), 5.0);
+    QCOMPARE(harness.editBar()->property("edgeClip").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Right);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 6.0, 3000);
+    QTest::keyClick(window, Qt::Key_BracketRight);
+    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
+        (edit::Clips{{0, 0.0, 5.0}, {0, 10.0, 11.0}, {0, 15.0, 20.0}}), 3000);
+    QCOMPARE(playhead(harness), 6.0);
+    QCOMPARE(harness.editBar()->property("edgeClip").toInt(), 1);
+    auto *player = window->findChild<QObject *>(QStringLiteral("player"));
+    QVERIFY(player);
+    QCOMPARE(player->property("clip").toInt(), 1);
 }
 
 void BackendTests::qmlKeysSplitAndRemoveClips() {
@@ -1955,7 +1994,7 @@ void BackendTests::qmlHelpOverlayBlocksEditingKeys() {
     // Split, delete, seek, export, play, and open all stay quiet behind
     // the overlay.
     QTest::keyClick(window, Qt::Key_S);
-    QTest::keyClick(window, Qt::Key_X);
+    QTest::keyClick(window, Qt::Key_Delete);
     QTest::keyClick(window, Qt::Key_Right);
     QTest::keyClick(window, Qt::Key_O, Qt::ControlModifier);
     QTest::keyClick(window, Qt::Key_S, Qt::ControlModifier);
@@ -1976,6 +2015,244 @@ void BackendTests::qmlHelpOverlayBlocksEditingKeys() {
     QTest::keyClick(window, Qt::Key_S);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
                               (edit::Clips{{0, 0.0, 1.0}, {0, 1.0, 20.0}}), 3000);
+}
+
+void BackendTests::qmlHelpClosesWithXOrButtonAndIgnoresOutsideClicks() {
+    ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
+    QmlHarness harness(backend);
+    QQuickWindow *window = showEditor(harness, backend);
+    QVERIFY2(window, qPrintable(mainQmlPath()));
+    window->resize(1000, 900);
+    backend.timeline.split(10.0);
+    const auto clips = backend.timeline.clips();
+    QTest::keyClick(window, Qt::Key_Question);
+    QTRY_VERIFY_WITH_TIMEOUT(window->property("helpVisible").toBool(), 3000);
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(2, 2));
+    QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, QPoint(2, 2));
+    QVERIFY(window->property("helpVisible").toBool());
+    auto *panel = window->findChild<QQuickItem *>(QStringLiteral("helpPanel"));
+    QVERIFY(panel);
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, itemCenter(panel));
+    QVERIFY(window->property("helpVisible").toBool());
+    QTest::keyClick(window, Qt::Key_X);
+    QTRY_VERIFY_WITH_TIMEOUT(!window->property("helpVisible").toBool(), 3000);
+    QCOMPARE(backend.timeline.clips(), clips);
+
+    QTest::keyClick(window, Qt::Key_Question);
+    QTRY_VERIFY_WITH_TIMEOUT(window->property("helpVisible").toBool(), 3000);
+    auto *close = window->findChild<QQuickItem *>(QStringLiteral("helpCloseButton"));
+    QVERIFY(close);
+    QVERIFY(close->isVisible());
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, itemCenter(close));
+    QTRY_VERIFY_WITH_TIMEOUT(!window->property("helpVisible").toBool(), 3000);
+    QCOMPARE(backend.timeline.clips(), clips);
+
+    // X resumes its normal editing action only after the help is closed.
+    QTest::keyClick(window, Qt::Key_X);
+    QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 10.0, 20.0}}), 3000);
+}
+
+static QQuickItem *findShortcutItem(QQuickItem *parent, const QString &name) {
+    if (parent->objectName() == name) return parent;
+    for (QQuickItem *child : parent->childItems())
+        if (auto *found = findShortcutItem(child, name)) return found;
+    return nullptr;
+}
+
+// Repeater delegates live in the visual tree; scroll the control into view.
+static QQuickItem *clickShortcutControl(QQuickWindow *window, const QString &name) {
+    auto *item = findShortcutItem(window->contentItem(), name);
+    auto *list = window->findChild<QQuickItem *>(QStringLiteral("shortcutList"));
+    if (!item || !list) return nullptr;
+    const double maxY = std::max(0.0, list->property("contentHeight").toDouble() - list->height());
+    const double y = item->mapToItem(list, QPointF()).y() + list->property("contentY").toDouble();
+    list->setProperty("contentY", std::clamp(y - list->height() / 2, 0.0, maxY));
+    QCoreApplication::processEvents();
+    const QPoint point = name.startsWith(QStringLiteral("shortcutBinding_"))
+        ? item->mapToScene(QPointF(item->width() / 2 - 10, item->height() / 2)).toPoint() : itemCenter(item);
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, point);
+    QCoreApplication::processEvents();
+    return item;
+}
+
+static QStringList configuredShortcuts(QmlHarness &harness, const QString &action) {
+    auto *store = qobject_cast<ShortcutSettings *>(
+        harness.engine().rootContext()->contextProperty(QStringLiteral("shortcutStore")).value<QObject *>());
+    return store ? store->overrides().value(action).toStringList() : QStringList{};
+}
+
+void BackendTests::qmlShortcutRecordingReplacesOneAliasAndPersists() {
+    QTemporaryDir settings;
+    const QString file = settings.filePath(QStringLiteral("keys.ini"));
+    {
+        ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
+        QmlHarness harness(backend, file);
+        QQuickWindow *window = showEditor(harness, backend);
+        QVERIFY(window);
+        backend.timeline.split(5.0);
+        backend.timeline.split(10.0);
+        const auto clips = backend.timeline.clips();
+        QTest::keyClick(window, Qt::Key_Question);
+        QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutBinding_remove_0")));
+        QCOMPARE(window->property("recordingShortcut").toString(), QStringLiteral("remove"));
+        auto *label = findShortcutItem(window->contentItem(), QStringLiteral("shortcutText_remove_0"));
+        QVERIFY(label);
+        QCOMPARE(label->property("text").toString(), QString());
+        QTest::keyClick(window, Qt::Key_Shift);
+        QCOMPARE(window->property("recordingShortcut").toString(), QStringLiteral("remove"));
+        QTest::keyClick(window, Qt::Key_S); // Conflict: split already uses S.
+        QCOMPARE(window->property("recordingShortcut").toString(), QStringLiteral("remove"));
+        QVERIFY(window->property("shortcutMessage").toString().contains(QStringLiteral("Already assigned")));
+        QTest::keyClick(window, Qt::Key_D, Qt::ControlModifier);
+        QCOMPARE(window->property("recordingShortcut").toString(), QString());
+        QCOMPARE(configuredShortcuts(harness, QStringLiteral("remove")),
+                 (QStringList{QStringLiteral("Ctrl+D"), QStringLiteral("Del"), QStringLiteral("Backspace")}));
+        QCOMPARE(backend.timeline.clips(), clips);
+        QVERIFY(window->property("helpVisible").toBool());
+        QTest::keyClick(window, Qt::Key_X); // Close help, do not delete.
+        QVERIFY(!window->property("helpVisible").toBool());
+        QTest::keyClick(window, Qt::Key_D, Qt::ControlModifier);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
+            (edit::Clips{{0, 5.0, 10.0}, {0, 10.0, 20.0}}), 3000);
+        const auto remaining = backend.timeline.clips();
+        QTest::keyClick(window, Qt::Key_X); // The replaced alias no longer removes.
+        QCOMPARE(backend.timeline.clips(), remaining);
+    }
+    {
+        ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
+        QmlHarness harness(backend, file);
+        QQuickWindow *window = showEditor(harness, backend);
+        QVERIFY(window);
+        backend.timeline.split(5.0);
+        backend.timeline.split(10.0);
+        QTest::keyClick(window, Qt::Key_D, Qt::ControlModifier);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
+            (edit::Clips{{0, 5.0, 10.0}, {0, 10.0, 20.0}}), 3000);
+        QTest::keyClick(window, Qt::Key_Backspace);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(), (edit::Clips{{0, 10.0, 20.0}}), 3000);
+    }
+}
+
+void BackendTests::qmlShortcutAlternativesCanBeAddedAndAllRemoved() {
+    QTemporaryDir settings;
+    const QString file = settings.filePath(QStringLiteral("keys.ini"));
+    ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
+    QmlHarness harness(backend, file);
+    QQuickWindow *window = showEditor(harness, backend);
+    QVERIFY(window);
+    backend.timeline.split(5.0);
+    QTest::keyClick(window, Qt::Key_Question);
+    for (int i = 0; i < 4; ++i)
+        QVERIFY(findShortcutItem(window->contentItem(), QStringLiteral("shortcutBinding_earlier_%1").arg(i)));
+    for (int i = 0; i < 3; ++i)
+        QVERIFY(findShortcutItem(window->contentItem(), QStringLiteral("shortcutBinding_remove_%1").arg(i)));
+    QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutAdd_earlier")));
+    auto *blank = findShortcutItem(window->contentItem(), QStringLiteral("shortcutNew_earlier"));
+    QVERIFY(blank && blank->isVisible());
+    QTest::keyClick(window, Qt::Key_Comma);
+    QCOMPARE(configuredShortcuts(harness, QStringLiteral("earlier")),
+        (QStringList{QStringLiteral("-"), QStringLiteral("−"), QStringLiteral("–"), QStringLiteral("—"), QStringLiteral(",")}));
+    QTRY_VERIFY_WITH_TIMEOUT(findShortcutItem(window->contentItem(), QStringLiteral("shortcutBinding_earlier_4")), 3000);
+    QTest::keyClick(window, Qt::Key_X);
+    QTest::keyClick(window, Qt::Key_Plus);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 15.0, 3000);
+    QTest::keyClick(window, Qt::Key_Comma);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+    QTest::keyClick(window, Qt::Key_Question);
+    for (int i = 0; i < 5; ++i) {
+        QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutRemove_earlier_0")));
+        QCOMPARE(configuredShortcuts(harness, QStringLiteral("earlier")).size(), 4 - i);
+    }
+    QTRY_VERIFY_WITH_TIMEOUT(!findShortcutItem(window->contentItem(), QStringLiteral("shortcutBinding_earlier_0")), 3000);
+    QVERIFY(findShortcutItem(window->contentItem(), QStringLiteral("shortcutAdd_earlier")));
+    ShortcutSettings reloaded(file);
+    QVERIFY(reloaded.overrides().contains(QStringLiteral("earlier")));
+    QVERIFY(reloaded.overrides().value(QStringLiteral("earlier")).toStringList().isEmpty());
+    QTest::keyClick(window, Qt::Key_X);
+    QTest::keyClick(window, Qt::Key_Plus);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 15.0, 3000);
+    QTest::keyClick(window, Qt::Key_Minus);
+    QTest::keyClick(window, Qt::Key_Comma);
+    QCOMPARE(playhead(harness), 15.0);
+    QTest::keyClick(window, Qt::Key_Question);
+    QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutAdd_earlier")));
+    QTest::keyClick(window, Qt::Key_Semicolon);
+    QCOMPARE(configuredShortcuts(harness, QStringLiteral("earlier")), (QStringList{QStringLiteral(";")}));
+    QTest::keyClick(window, Qt::Key_X);
+    QTest::keyClick(window, Qt::Key_Semicolon);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+    QTest::keyClick(window, Qt::Key_Question);
+    QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutReset")));
+    QTRY_VERIFY_WITH_TIMEOUT(findShortcutItem(window->contentItem(), QStringLiteral("shortcutBinding_earlier_3")), 3000);
+    QTest::keyClick(window, Qt::Key_X);
+    QTest::keyClick(window, Qt::Key_Plus);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 15.0, 3000);
+    QTest::keyClick(window, Qt::Key_Minus);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+}
+
+void BackendTests::qmlShortcutCaptureCancelsOutsideAndKeepsBindings() {
+    ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
+    QmlHarness harness(backend);
+    QQuickWindow *window = showEditor(harness, backend);
+    QVERIFY(window);
+    backend.timeline.split(5.0);
+    QTest::keyClick(window, Qt::Key_Question);
+    QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutBinding_earlier_0")));
+    QTest::keyClick(window, Qt::Key_Comma);
+    const auto keys = configuredShortcuts(harness, QStringLiteral("earlier"));
+    QCOMPARE(keys.first(), QStringLiteral(","));
+
+    // Clicking inside the empty replacement field keeps recording active.
+    QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutBinding_earlier_0")));
+    QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutBinding_earlier_0")));
+    QCOMPARE(window->property("recordingShortcut").toString(), QStringLiteral("earlier"));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(2, 2));
+    QCOMPARE(window->property("recordingShortcut").toString(), QString());
+    QVERIFY(window->property("helpVisible").toBool());
+    QCOMPARE(configuredShortcuts(harness, QStringLiteral("earlier")), keys);
+    auto *label = findShortcutItem(window->contentItem(), QStringLiteral("shortcutText_earlier_0"));
+    QVERIFY(label);
+    QCOMPARE(label->property("text").toString(), QStringLiteral(","));
+
+    // A click within the popup, outside a new field, discards the pending alias.
+    QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutAdd_earlier")));
+    QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutAction_earlier")));
+    QCOMPARE(window->property("recordingShortcut").toString(), QString());
+    QVERIFY(window->property("helpVisible").toBool());
+    QCOMPARE(configuredShortcuts(harness, QStringLiteral("earlier")), keys);
+    auto *blank = findShortcutItem(window->contentItem(), QStringLiteral("shortcutNew_earlier"));
+    QVERIFY(blank && !blank->isVisible());
+
+    QTest::keyClick(window, Qt::Key_X);
+    QTest::keyClick(window, Qt::Key_Plus);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 15.0, 3000);
+    QTest::keyClick(window, Qt::Key_Comma);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+}
+
+void BackendTests::qmlJumpEndStartsUnboundAndCanBeConfigured() {
+    ShortcutBackend backend(placeholderUrl(m_dir), 20.0);
+    QmlHarness harness(backend);
+    QQuickWindow *window = showEditor(harness, backend);
+    QVERIFY(window);
+    QTest::keyClick(window, Qt::Key_End);
+    QCOMPARE(playhead(harness), 0.0);
+    QTest::keyClick(window, Qt::Key_Question);
+    QVERIFY(!findShortcutItem(window->contentItem(), QStringLiteral("shortcutBinding_jumpEnd_0")));
+    QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutAdd_jumpEnd")));
+    QTest::keyClick(window, Qt::Key_End);
+    QCOMPARE(configuredShortcuts(harness, QStringLiteral("jumpEnd")), (QStringList{QStringLiteral("End")}));
+    QTest::keyClick(window, Qt::Key_X);
+    QTest::keyClick(window, Qt::Key_End);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 20.0, 3000);
+    QTest::keyClick(window, Qt::Key_0);
+    QTRY_COMPARE_WITH_TIMEOUT(playhead(harness), 0.0, 3000);
+    QTest::keyClick(window, Qt::Key_Question);
+    QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutRemove_jumpEnd_0")));
+    QTest::keyClick(window, Qt::Key_X);
+    QTest::keyClick(window, Qt::Key_End);
+    QCOMPARE(playhead(harness), 0.0);
 }
 
 void BackendTests::qmlQuitConfirmsUnexportedEdit() {

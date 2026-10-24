@@ -164,7 +164,20 @@ ApplicationWindow {
     }
     property bool quitting: false
     function trimClipAtPlayhead(start) {
-        timeline.trimTo(editBar.playheadSec, start);
+        var index = edgeClip >= 0 ? edgeClip : timeline.clipAt(editBar.playheadSec);
+        if (index < 0 || index >= timeline.clips.length) return;
+        var clip = timeline.clips[index];
+        var at = clip.in + editBar.playheadSec - clip.start;
+        timeline.setClip(index, start ? at : clip.in, start ? clip.out : at);
+        clip = timeline.clips[index];
+        // An invalid trim (e.g. a zero-length result) leaves everything alone.
+        if (Math.abs((start ? clip.in : clip.out) - at) > 0.000001) return;
+        player.pause();
+        player.finishPriming();
+        edgeClip = index;
+        edgeDirection = start ? -1 : 1;
+        editBar.playheadSec = start ? clip.start : clip.end;
+        player.show(index, start ? clip.in : Math.max(clip.in, clip.out - 0.001), false);
     }
     function requestQuit() {
         if (unexported) {
@@ -215,192 +228,455 @@ ApplicationWindow {
         forceQuit();
     }
 
-    // The playback and editing shortcuts go quiet while the quit confirmation is
-    // up — a disabled Shortcut also stops swallowing its key, which lets the
-    // dialog's own keyboard navigation receive the arrows, Space and Enter.
-    // Digits 1-9 select 10%-90% of the whole edit; 0 returns to its start.
-    Instantiator {
-        model: [1, 2, 3, 4, 5, 6, 7, 8, 9]
-        delegate: Shortcut {
-            required property int modelData
-            sequence: modelData.toString()
-            context: Qt.ApplicationShortcut
-            enabled: win.editing
-            // Held down, repeats would keep seeking to the same spot.
-            autoRepeat: false
-            onActivated: seekTo(timeline.duration * modelData / 10)
+    property var shortcutOverrides: shortcutStore.overrides
+    property string recordingShortcut: ""
+    property int recordingShortcutIndex: -1
+    property Item shortcutCaptureItem: null
+    property string shortcutMessage: ""
+    readonly property var shortcutDefinitions: [
+        {
+                "id": "play",
+                "label": "Play / pause",
+                "keys": [
+                        "Space"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jump10",
+                "label": "Jump to 10% of the edit",
+                "keys": [
+                        "1"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jump20",
+                "label": "Jump to 20% of the edit",
+                "keys": [
+                        "2"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jump30",
+                "label": "Jump to 30% of the edit",
+                "keys": [
+                        "3"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jump40",
+                "label": "Jump to 40% of the edit",
+                "keys": [
+                        "4"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jump50",
+                "label": "Jump to 50% of the edit",
+                "keys": [
+                        "5"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jump60",
+                "label": "Jump to 60% of the edit",
+                "keys": [
+                        "6"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jump70",
+                "label": "Jump to 70% of the edit",
+                "keys": [
+                        "7"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jump80",
+                "label": "Jump to 80% of the edit",
+                "keys": [
+                        "8"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jump90",
+                "label": "Jump to 90% of the edit",
+                "keys": [
+                        "9"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jumpStart",
+                "label": "Jump to the start",
+                "keys": [
+                        "0"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "jumpEnd",
+                "label": "Jump to the end",
+                "keys": [],
+                "scope": "edit"
+        },
+        {
+                "id": "seekBack1",
+                "label": "Move playhead back 1s",
+                "keys": [
+                        "Left"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "seekForward1",
+                "label": "Move playhead forward 1s",
+                "keys": [
+                        "Right"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "seekBack5",
+                "label": "Move playhead back 5s",
+                "keys": [
+                        "Shift+Left"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "seekForward5",
+                "label": "Move playhead forward 5s",
+                "keys": [
+                        "Shift+Right"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "seekBackFine",
+                "label": "Move playhead back 0.2s",
+                "keys": [
+                        "Alt+Left"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "seekForwardFine",
+                "label": "Move playhead forward 0.2s",
+                "keys": [
+                        "Alt+Right"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "previousEdge",
+                "label": "Clip in; repeat for previous clip",
+                "keys": [
+                        "Shift+Tab"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "nextEdge",
+                "label": "Clip out; repeat for next clip",
+                "keys": [
+                        "Tab"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "split",
+                "label": "Split the clip at the playhead",
+                "keys": [
+                        "S"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "remove",
+                "label": "Remove the clip",
+                "keys": [
+                        "X",
+                        "Delete",
+                        "Backspace"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "earlier",
+                "label": "Move the clip earlier",
+                "keys": [
+                        "-",
+                        "−",
+                        "–",
+                        "—"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "later",
+                "label": "Move the clip later",
+                "keys": [
+                        "+"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "trimIn",
+                "label": "Clip start (in) to playhead",
+                "keys": [
+                        "["
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "trimOut",
+                "label": "Clip end (out) to playhead",
+                "keys": [
+                        "]"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "undo",
+                "label": "Undo",
+                "keys": [
+                        "Ctrl+Z"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "redo",
+                "label": "Redo",
+                "keys": [
+                        "Ctrl+Shift+Z",
+                        "Ctrl+Y"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "zoom",
+                "label": "Zoom in / show the whole edit",
+                "keys": [
+                        "Z"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "frame",
+                "label": "Save the playhead frame as a PNG",
+                "keys": [
+                        "F"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "open",
+                "label": "Open a video",
+                "keys": [
+                        "Ctrl+O"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "add",
+                "label": "Add a video after this clip",
+                "keys": [
+                        "Ctrl+Shift+O"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "export",
+                "label": "Export",
+                "keys": [
+                        "Ctrl+S"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "quit",
+                "label": "Quit",
+                "keys": [
+                        "Q"
+                ],
+                "scope": "edit"
+        },
+        {
+                "id": "help",
+                "label": "Show / hide these shortcuts",
+                "keys": [
+                        "?"
+                ],
+                "scope": "global"
+        },
+        {
+                "id": "closeHelp",
+                "label": "Close this help",
+                "keys": [
+                        "X"
+                ],
+                "scope": "help"
+        },
+        {
+                "id": "dismiss",
+                "label": "Dismiss the current dialog",
+                "keys": [
+                        "Escape"
+                ],
+                "scope": "global"
         }
+]
+    onHelpVisibleChanged: {
+        if (!helpVisible) cancelShortcutCapture();
     }
-
-    Shortcut {
-        sequence: "0"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        autoRepeat: false
-        onActivated: seekTo(0)
-    }
-
-    Shortcut {
-        sequence: "Space"
-        context: Qt.ApplicationShortcut
-        enabled: win.hasVideo && !win.quitConfirmVisible && !win.openConfirmVisible && !win.helpVisible
-        onActivated: togglePlay()
-    }
-
-    Shortcut {
-        sequence: "Left"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        onActivated: seekTo(editBar.playheadSec - 1)
-    }
-
-    Shortcut {
-        sequence: "Right"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        onActivated: seekTo(editBar.playheadSec + 1)
-    }
-
-    Shortcut {
-        sequence: "Shift+Left"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        onActivated: seekTo(editBar.playheadSec - 5)
-    }
-
-    Shortcut {
-        sequence: "Shift+Right"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        onActivated: seekTo(editBar.playheadSec + 5)
-    }
-
-    Shortcut {
-        sequence: "Alt+Left"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        onActivated: seekTo(editBar.playheadSec - 0.2)
-    }
-
-    Shortcut {
-        sequence: "Alt+Right"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        onActivated: seekTo(editBar.playheadSec + 0.2)
-    }
-
-    Shortcut {
-        sequence: "Shift+Tab"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        onActivated: jumpToClipEdge(-1)
-    }
-
-    Shortcut {
-        sequence: "Tab"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing
-        onActivated: jumpToClipEdge(1)
-    }
-
-    Shortcut {
-        sequence: "S"
-        context: Qt.ApplicationShortcut
-        autoRepeat: false
-        enabled: win.editing
-        onActivated: timeline.split(editBar.playheadSec)
-    }
-
-    Shortcut {
-        sequences: ["X", "Delete", "Backspace"]
-        context: Qt.ApplicationShortcut
-        autoRepeat: false
-        enabled: win.editing
-        onActivated: timeline.removeAt(editBar.playheadSec)
-    }
-
-    Shortcut {
-        sequence: "Z"
-        context: Qt.ApplicationShortcut
-        autoRepeat: false
-        enabled: win.editing
-        onActivated: editBar.toggleZoom()
-    }
-
-    Shortcut {
-        sequence: "F"
-        context: Qt.ApplicationShortcut
-        autoRepeat: false
-        enabled: win.editing && !backend.busy
-        onActivated: backend.saveFrame(editBar.playheadSec)
-    }
-
-    Shortcut {
-        sequence: "Ctrl+Z"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing && timeline.canUndo
-        onActivated: timeline.undo()
-    }
-
-    Shortcut {
-        sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
-        context: Qt.ApplicationShortcut
-        enabled: win.editing && timeline.canRedo
-        onActivated: timeline.redo()
-    }
-
-    Shortcut {
-        sequence: "Ctrl+S"
-        context: Qt.ApplicationShortcut
-        enabled: win.hasVideo && timeline.duration > 0 && !backend.busy && !win.helpVisible && !win.openConfirmVisible
-        onActivated: {
-            win.quitConfirmVisible = false;
-            exportVideo();
+    function shortcutSequences(action) {
+        if (Object.prototype.hasOwnProperty.call(shortcutOverrides, action)) {
+            var stored = shortcutOverrides[action];
+            return Array.from(typeof stored === "string" ? [stored] : stored).map(k => shortcutStore.normalizeSequence(k));
         }
+        for (var i = 0; i < shortcutDefinitions.length; ++i)
+            if (shortcutDefinitions[i].id === action)
+                return shortcutDefinitions[i].keys.map(k => shortcutStore.normalizeSequence(k));
+        return [];
     }
-
-    Shortcut {
-        sequence: "Ctrl+O"
-        context: Qt.ApplicationShortcut
-        enabled: !win.quitConfirmVisible && !win.openConfirmVisible && !win.helpVisible && !backend.busy
-        onActivated: openVideo()
+    function shortcutDisplay(sequence) {
+        return sequence.replace(/Ctrl\+/g, "Cmd+").replace(/Meta\+/g, "Ctrl+")
+            .replace(/Left/g, "←").replace(/Right/g, "→")
+            .replace(/^Del$/, "Delete").replace(/^Esc$/, "Escape");
     }
-
-    Shortcut {
-        sequence: "Ctrl+Shift+O"
-        context: Qt.ApplicationShortcut
-        enabled: win.editing && !backend.busy
-        onActivated: addVideo()
+    function beginShortcutCapture(action, index, field) {
+        recordingShortcutIndex = index;
+        shortcutCaptureItem = field || null;
+        recordingShortcut = action;
+        shortcutMessage = "Press the new key or key combination.";
     }
-
-    Shortcut {
-        sequence: "Q"
-        context: Qt.ApplicationShortcut
-        onActivated: {
-            if (!win.quitConfirmVisible && !win.openConfirmVisible && !win.helpVisible)
-                requestQuit();
+    function cancelShortcutCapture() {
+        recordingShortcut = "";
+        shortcutCaptureItem = null;
+        shortcutMessage = "";
+    }
+    function cancelShortcutOutside(x, y) {
+        if (shortcutCaptureItem) {
+            var point = shortcutCaptureItem.mapFromItem(win.contentItem, x, y);
+            if (point.x >= 0 && point.y >= 0 && point.x <= shortcutCaptureItem.width
+                    && point.y <= shortcutCaptureItem.height) return;
         }
+        cancelShortcutCapture();
     }
-
-    Shortcut {
-        sequence: "?"
-        context: Qt.ApplicationShortcut
-        onActivated: {
-            if (!win.quitConfirmVisible && !win.openConfirmVisible)
-                win.helpVisible = !win.helpVisible;
+    function ensureShortcutVisible(item) {
+        var y = item.mapToItem(helpColumn, 0, 0).y;
+        if (y < shortcutList.contentY) shortcutList.contentY = y;
+        else if (y + item.height > shortcutList.contentY + shortcutList.height)
+            shortcutList.contentY = Math.min(shortcutList.contentHeight - shortcutList.height,
+                                              y + item.height - shortcutList.height);
+    }
+    function assignShortcut(action, sequence) {
+        var definition = shortcutDefinitions.filter(d => d.id === action)[0];
+        for (var i = 0; i < shortcutDefinitions.length; ++i) {
+            var other = shortcutDefinitions[i];
+            if (other.id === action) continue;
+            // Editing and help-only actions can intentionally share X.
+            if ((definition.scope === "help" && other.scope === "edit")
+                    || (definition.scope === "edit" && other.scope === "help")) continue;
+            if (shortcutSequences(other.id).indexOf(sequence) >= 0) {
+                shortcutMessage = "Already assigned to “" + other.label + "”. Choose another shortcut.";
+                return false;
+            }
         }
+        var keys = Array.from(shortcutSequences(action));
+        if (keys.indexOf(sequence) >= 0 && keys.indexOf(sequence) !== recordingShortcutIndex) {
+            shortcutMessage = "This action already has that shortcut. Choose another one.";
+            return false;
+        }
+        if (recordingShortcutIndex < 0) keys.push(sequence);
+        else keys[recordingShortcutIndex] = sequence;
+        shortcutStore.setBindings(action, keys);
+        recordingShortcut = "";
+        shortcutCaptureItem = null;
+        shortcutMessage = "Shortcut saved.";
+        return true;
     }
-
-    Shortcut {
-        sequence: "Escape"
-        context: Qt.ApplicationShortcut
-        onActivated: {
-            if (win.quitConfirmVisible)
-                win.quitConfirmVisible = false;
-            else if (win.openConfirmVisible)
-                win.openConfirmVisible = false;
-            else if (win.helpVisible)
-                win.helpVisible = false;
+    function removeShortcut(action, index) {
+        var keys = Array.from(shortcutSequences(action));
+        if (index < 0 || index >= keys.length) return;
+        keys.splice(index, 1);
+        if (recordingShortcut === action) recordingShortcut = "";
+        shortcutStore.setBindings(action, keys);
+        shortcutMessage = "Shortcut removed.";
+    }
+    function shortcutEnabled(action) {
+        if (action === "closeHelp") return helpVisible;
+        if (action === "help") return !quitConfirmVisible && !openConfirmVisible;
+        if (action === "dismiss") return quitConfirmVisible || openConfirmVisible || helpVisible;
+        if (helpVisible) return false;
+        if (action === "export") return hasVideo && timeline.duration > 0 && !backend.busy && !openConfirmVisible;
+        if (action === "open") return !quitConfirmVisible && !openConfirmVisible && !backend.busy;
+        if (action === "play") return hasVideo && !quitConfirmVisible && !openConfirmVisible;
+        if (action === "quit") return !quitConfirmVisible && !openConfirmVisible;
+        if (!editing) return false;
+        if (action === "undo") return timeline.canUndo;
+        if (action === "redo") return timeline.canRedo;
+        if (action === "frame" || action === "add") return !backend.busy;
+        return true;
+    }
+    function handleShortcut(sequence, repeated, preview) {
+        for (var i = 0; i < shortcutDefinitions.length; ++i) {
+            var action = shortcutDefinitions[i].id;
+            if (!shortcutEnabled(action) || shortcutSequences(action).indexOf(sequence) < 0) continue;
+            if (preview) return true;
+            var mayRepeat = action.indexOf("seek") === 0 || action === "earlier" || action === "later"
+                || action === "undo" || action === "redo";
+            if (!repeated || mayRepeat) triggerShortcut(action);
+            return true;
+        }
+        return false;
+    }
+    function triggerShortcut(action) {
+        if (action.indexOf("jump") === 0 && action !== "jumpStart" && action !== "jumpEnd") {
+            seekTo(timeline.duration * parseInt(action.substring(4)) / 100); return;
+        }
+        switch (action) {
+        case "jumpStart": seekTo(0); break;
+        case "jumpEnd": seekTo(timeline.duration); break;
+        case "play": togglePlay(); break;
+        case "seekBack1": seekTo(editBar.playheadSec - 1); break;
+        case "seekForward1": seekTo(editBar.playheadSec + 1); break;
+        case "seekBack5": seekTo(editBar.playheadSec - 5); break;
+        case "seekForward5": seekTo(editBar.playheadSec + 5); break;
+        case "seekBackFine": seekTo(editBar.playheadSec - 0.2); break;
+        case "seekForwardFine": seekTo(editBar.playheadSec + 0.2); break;
+        case "previousEdge": jumpToClipEdge(-1); break;
+        case "nextEdge": jumpToClipEdge(1); break;
+        case "split": timeline.split(editBar.playheadSec); break;
+        case "remove": timeline.removeAt(editBar.playheadSec); break;
+        case "earlier": moveClipBy(-1); break;
+        case "later": moveClipBy(1); break;
+        case "trimIn": trimClipAtPlayhead(true); break;
+        case "trimOut": trimClipAtPlayhead(false); break;
+        case "undo": timeline.undo(); break;
+        case "redo": timeline.redo(); break;
+        case "zoom": editBar.toggleZoom(); break;
+        case "frame": backend.saveFrame(editBar.playheadSec); break;
+        case "open": openVideo(); break;
+        case "add": addVideo(); break;
+        case "export": quitConfirmVisible = false; exportVideo(); break;
+        case "quit": requestQuit(); break;
+        case "help": helpVisible = !helpVisible; break;
+        case "closeHelp": helpVisible = false; break;
+        case "dismiss":
+            if (quitConfirmVisible) quitConfirmVisible = false;
+            else if (openConfirmVisible) openConfirmVisible = false;
+            else if (helpVisible) helpVisible = false;
+            break;
         }
     }
 
@@ -670,6 +946,13 @@ ApplicationWindow {
                     ctx.moveTo(5, 12);
                     ctx.lineTo(19, 12);
                     ctx.stroke();
+                } else if (iconButton.iconName === "close") {
+                    ctx.beginPath();
+                    ctx.moveTo(6, 6);
+                    ctx.lineTo(18, 18);
+                    ctx.moveTo(18, 6);
+                    ctx.lineTo(6, 18);
+                    ctx.stroke();
                 } else if (iconButton.iconName === "download") {
                     ctx.beginPath();
                     ctx.moveTo(12, 4);
@@ -928,79 +1211,189 @@ ApplicationWindow {
         }
     }
 
-    // --- hotkey overlay ---
+    // --- editable hotkey overlay ---
     Rectangle {
         visible: win.helpVisible
         anchors.fill: parent
         color: "#cc000000"
-
-        MouseArea {
-            anchors.fill: parent
-            onClicked: win.helpVisible = false
-        }
-
+        MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
         Rectangle {
+            objectName: "helpPanel"
             anchors.centerIn: parent
-            width: helpColumn.width + 56
-            height: helpColumn.height + 48
+            width: Math.min(parent.width - 32, 700)
+            height: helpLayout.height + 48
             radius: 12
             color: "#1c1c1e"
-
             Column {
-                id: helpColumn
+                id: helpLayout
+                width: parent.width - 48
                 anchors.centerIn: parent
-                spacing: 10
-
+                spacing: 12
                 Label {
                     text: "Keyboard shortcuts"
                     color: "white"
                     font.pixelSize: 16
                     font.weight: Font.DemiBold
-                    bottomPadding: 8
+                    height: 32
+                    verticalAlignment: Text.AlignVCenter
                 }
-
-                Repeater {
-                    model: [
-                        { keys: "Space", action: "Play / pause" },
-                        { keys: "1–9", action: "Jump to 10%–90% of the edit" },
-                        { keys: "0", action: "Jump to the start" },
-                        { keys: "← / →", action: "Move playhead 1s" },
-                        { keys: "Shift ← / →", action: "Move playhead 5s" },
-                        { keys: "Alt ← / →", action: "Move playhead 0.2s" },
-                        { keys: "Tab", action: "Clip out; repeat for next clip" },
-                        { keys: "Shift Tab", action: "Clip in; repeat for previous clip" },
-                        { keys: "S", action: "Split the clip at the playhead" },
-                        { keys: "X", action: "Remove the clip" },
-                        { keys: "- / – / —", action: "Move the clip earlier" },
-                        { keys: "+", action: "Move the clip later" },
-                        { keys: "[", action: "Clip start (in) to playhead" },
-                        { keys: "]", action: "Clip end (out) to playhead" },
-                        { keys: "Cmd Z", action: "Undo (Cmd Shift Z redo)" },
-                        { keys: "Z", action: "Zoom to the clip" },
-                        { keys: "F", action: "Save the playhead frame as a PNG" },
-                        { keys: "Cmd O", action: "Open a video" },
-                        { keys: "Cmd Shift O", action: "Add a video after this clip" },
-                        { keys: "Cmd S", action: "Export" },
-                        { keys: "Q", action: "Quit" },
-                        { keys: "?", action: "Show these shortcuts" }
-                    ]
-                    delegate: Row {
-                        spacing: 18
-                        Label {
-                            width: 110
-                            horizontalAlignment: Text.AlignRight
-                            text: modelData.keys
-                            color: win.accent
-                            font.pixelSize: 13
-                            font.family: "monospace"
+                Label {
+                    objectName: "shortcutStatus"
+                    width: parent.width
+                    text: win.shortcutMessage || "Click a yellow shortcut to change it; + adds an alternative, − removes one."
+                    color: win.recordingShortcut !== "" ? win.accent : "#b6b6bc"
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                }
+                Flickable {
+                    id: shortcutList
+                    objectName: "shortcutList"
+                    width: parent.width
+                    height: Math.min(contentHeight, Math.max(90, win.height - 230))
+                    contentWidth: width
+                    contentHeight: helpColumn.height
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar {
+                        id: shortcutScrollBar
+                        width: 10
+                        padding: 2
+                        policy: ScrollBar.AsNeeded
+                        background: Rectangle {
+                            color: "#2c2c2f"
+                            radius: width / 2
                         }
-                        Label {
-                            text: modelData.action
-                            color: "#d6d6da"
-                            font.pixelSize: 13
+                        contentItem: Rectangle {
+                            implicitWidth: 6
+                            implicitHeight: 24
+                            radius: width / 2
+                            color: shortcutScrollBar.pressed ? "#a0a0a6" : "#707078"
+                        }
+                    }
+                    Column {
+                        id: helpColumn
+                        width: shortcutList.width - 12
+                        spacing: 8
+                        Repeater {
+                            model: win.shortcutDefinitions
+                            delegate: Item {
+                                id: shortcutRow
+                                required property var modelData
+                                width: helpColumn.width
+                                height: Math.max(bindingFlow.implicitHeight, actionLabel.implicitHeight, 36)
+                                Flow {
+                                    id: bindingFlow
+                                    width: Math.min(230, shortcutRow.width * 0.46)
+                                    spacing: 4
+                                    Repeater {
+                                        model: win.shortcutSequences(shortcutRow.modelData.id)
+                                        delegate: Rectangle {
+                                            id: bindingCell
+                                            required property string modelData
+                                            required property int index
+                                            readonly property bool recording: win.recordingShortcut === shortcutRow.modelData.id
+                                                && win.recordingShortcutIndex === index
+                                            onRecordingChanged: if (recording) Qt.callLater(() => win.ensureShortcutVisible(bindingCell))
+                                            objectName: "shortcutBinding_" + shortcutRow.modelData.id + "_" + index
+                                            width: recording ? 90 : bindingLabel.implicitWidth + 40
+                                            height: 32
+                                            radius: 5
+                                            color: recording ? "#2c2c2f" : "transparent"
+                                            border.width: recording ? 1 : 0
+                                            border.color: win.accent
+                                            Accessible.role: Accessible.Button
+                                            Accessible.name: "Change " + shortcutRow.modelData.label + " shortcut " + win.shortcutDisplay(modelData)
+                                            Label {
+                                                id: bindingLabel
+                                                objectName: "shortcutText_" + shortcutRow.modelData.id + "_" + bindingCell.index
+                                                anchors.centerIn: parent
+                                                anchors.horizontalCenterOffset: -10
+                                                text: bindingCell.recording ? "" : win.shortcutDisplay(bindingCell.modelData)
+                                                color: win.accent
+                                                font.pixelSize: 13
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: win.beginShortcutCapture(shortcutRow.modelData.id, bindingCell.index, bindingCell)
+                                            }
+                                            Rectangle {
+                                                objectName: "shortcutRemove_" + shortcutRow.modelData.id + "_" + bindingCell.index
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 3
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 22; height: 24; radius: 4
+                                                color: "#2c2c2f"
+                                                Accessible.role: Accessible.Button
+                                                Accessible.name: "Remove " + win.shortcutDisplay(bindingCell.modelData) + " shortcut for " + shortcutRow.modelData.label
+                                                Label { anchors.centerIn: parent; text: "−"; color: win.accent; font.pixelSize: 18 }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: win.removeShortcut(shortcutRow.modelData.id, bindingCell.index)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        objectName: "shortcutAdd_" + shortcutRow.modelData.id
+                                        width: 28; height: 32; radius: 5
+                                        color: "#2c2c2f"
+                                        Accessible.role: Accessible.Button
+                                        Accessible.name: "Add shortcut for " + shortcutRow.modelData.label
+                                        Label { anchors.centerIn: parent; text: "+"; color: win.accent; font.pixelSize: 20 }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: win.beginShortcutCapture(shortcutRow.modelData.id, -1, newBindingField)
+                                        }
+                                    }
+                                    Rectangle {
+                                        id: newBindingField
+                                        objectName: "shortcutNew_" + shortcutRow.modelData.id
+                                        visible: win.recordingShortcut === shortcutRow.modelData.id && win.recordingShortcutIndex < 0
+                                        onVisibleChanged: if (visible) Qt.callLater(() => win.ensureShortcutVisible(newBindingField))
+                                        width: 90; height: visible ? 32 : 0; radius: 5
+                                        color: "#2c2c2f"; border.width: 1; border.color: win.accent
+                                        MouseArea { anchors.fill: parent }
+                                    }
+                                }
+                                Label {
+                                    id: actionLabel
+                                    objectName: "shortcutAction_" + shortcutRow.modelData.id
+                                    anchors.left: bindingFlow.right
+                                    anchors.leftMargin: 16
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width - bindingFlow.width - 16
+                                    text: shortcutRow.modelData.label
+                                    color: "#d6d6da"
+                                    font.pixelSize: 13
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
                         }
                     }
                 }
+                Button {
+                    objectName: "shortcutReset"
+                    text: "Reset defaults"
+                    onClicked: {
+                        win.cancelShortcutCapture();
+                        shortcutStore.reset();
+                        win.shortcutMessage = "Default shortcuts restored.";
+                    }
+                }
+            }
+            IconButton {
+                objectName: "helpCloseButton"
+                anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 12
+                width: 32; height: 32; radius: 16
+                iconName: "close"
+                tipText: "Close shortcuts"
+                Accessible.role: Accessible.Button
+                Accessible.name: "Close shortcuts"
+                Accessible.onPressAction: win.helpVisible = false
+                onClicked: win.helpVisible = false
             }
         }
     }

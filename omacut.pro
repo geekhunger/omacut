@@ -5,6 +5,7 @@ TARGET = omacut
 TEMPLATE = app
 
 HEADERS += \
+    src/shortcutsettings.h \
     src/clipmovekeys.h \
     src/filepicker.h \
     src/portalfilepicker.h \

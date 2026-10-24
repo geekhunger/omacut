@@ -84,6 +84,7 @@ These bindings are included in the
 - `Space`: Start/pause video playback.
 - `1`–`9`: Jump to 10%–90% of the whole edit.
 - `0`: Jump to the start of the edit.
+- **Jump to the end:** Unassigned by default. Use its **+** in the shortcut panel to add a binding.
 - `Left` / `Right`: Move the playhead by 1 second.
 - `Shift+Left` / `Shift+Right`: Move the playhead by 5 seconds.
 - `Alt+Left` / `Alt+Right`: Move the playhead by 0.2 seconds.
@@ -93,8 +94,8 @@ These bindings are included in the
 - `X`, `Delete` or `Backspace`: Remove the clip under the playhead.
 - `-`, `−`, `–` or `—`: Move the current clip one position earlier, keeping the playhead on the same frame of that clip.
 - `+`: Move the current clip one position later, keeping the playhead on the same frame of that clip.
-- `[`: Move the current clip's start (in marker) to the playhead.
-- `]`: Move the current clip's end (out marker) to the playhead.
+- `[`: Move the current clip's start (in marker) to the playhead, then place the playhead at the new clip start.
+- `]`: Move the current clip's end (out marker) to the playhead, then place the playhead at the new clip end.
 - `Cmd+Z`: Undo.
 - `Cmd+Shift+Z` or `Cmd+Y`: Redo.
 - `Z`: Zoom into the clip at the playhead; press again to show the whole edit immediately. The view follows the playhead and adapts to edits so the shortest clip spans at least 10% of the visible timeline.
@@ -104,12 +105,29 @@ These bindings are included in the
 - `Cmd+S`: Export the current edit.
 - `Q`: Quit; ask first if the edit has unexported changes.
 - `?`: Toggle the shortcut help overlay.
+- `X` while the shortcut help is open: Close the help. You can also click its top-right X button; clicking outside the panel leaves it open.
 - `Escape`: Dismiss the quit confirmation, open confirmation or shortcut help overlay.
 
 Clip-move shortcuts follow the character typed by the active keyboard layout,
 including numeric-keypad `+` / `-` and Option combinations that produce `–` or `—`.
 Cmd combinations keep their own meanings. On a German Mac keyboard, type `[`
 with `Option+5` and `]` with `Option+6`.
+
+## Customize shortcuts
+
+Open the shortcut panel with `?` or the **?** button. Every configured shortcut is shown, including all alternatives. The listed bindings above are the defaults.
+
+- Click a **yellow shortcut** to replace that one binding. An empty field appears; press the new key or key combination to save it.
+- Click the **+** beside an action to record another shortcut. Existing alternatives stay assigned.
+- Click the **−** beside a shortcut to remove only that binding. An action with no bindings shows only **+**, so its first shortcut can be added again.
+- Changes take effect immediately and remain saved after restarting the app. Recording a key does not run the action.
+- To cancel recording, click anywhere outside its input field. The previous binding stays unchanged; a pending new alternative is discarded. Clicking another app cancels recording too.
+- If the combination already belongs to another action available in the same context, the panel identifies that action and waits for a different combination.
+- **Reset defaults** restores the original bindings.
+
+`Remove clip` starts with **X**, **Delete** and **Backspace**. `Move the clip earlier` starts with **-**, **−**, **–** and **—**. Each alternative can be changed or removed independently.
+
+The help panel has a top-right **X** button and a scrollable list with a pill-shaped scrollbar and track. Its default close shortcut is **X** while the panel is open. Clicking outside the panel leaves it open and cancels any pending shortcut recording.
 
 ## Install
 
@@ -172,13 +190,14 @@ customizations. They are included in the
 
 - **Clip-edge navigation:** Replaced `[` / `]` with `Shift+Tab` / `Tab`. Repeated presses traverse clip in/out points; reversing direction visits the other edge of the same clip first. An out-point preview stays on that clip's last frame rather than switching to the next clip.
 - **Clip movement:** Replaced `Alt+[` / `Alt+]` with minus/dash characters and `+`. Moving preserves the selected clip, its preview frame and its in/out-edge association, including repeated moves and reversing direction at the sequence boundaries.
-- **Clip trimming:** `[` moves the clip's in marker to the playhead; `]` moves its out marker to the playhead. Both also work when typed with Option on a German Mac keyboard.
+- **Clip trimming:** `[` moves the in marker to the playhead and then seeks to the new clip start; `]` moves the out marker and seeks to the new clip end. The edited clip keeps its preview/edge association. Both bindings also work when typed with Option on a German Mac keyboard.
 - **Keyboard-layout handling:** Added character-based editing shortcuts for `+`, `-`, `−`, `–`, `—`, `[` and `]`, numeric-keypad keys and macOS Option-generated characters. Physical key codes no longer override the character actually typed; Cmd shortcuts remain separate.
+- **Editable shortcuts:** Added recording of single keys/combinations, multiple editable alternatives per action, individual removal, persistent settings, conflict feedback and a defaults reset. Clicking outside the active recording field cancels capture and preserves the previous bindings. The scrollable shortcut panel stays open on outside clicks, has an explicit X close button and uses a pill-shaped scrollbar and background track.
 - **Keyboard controls and help:** Removed the modifier-plus-Space trim bindings and switched Mac help/documentation to `Cmd`. Made `0` a dedicated jump-to-start shortcut, retained `1`–`9` for 10%–90% jumps, and updated the in-app help for the revised navigation and movement keys.
 - **Zoom toggle:** Changed `Z` so a second press always returns immediately to the whole edit, including after trimming or moving to a different clip.
 - **Zoom that follows editing:** Added automatic panning with the playhead during seeking, playback and clip-edge navigation. The zoom adapts when clip lengths change so the shortest clip spans at least 10% of the visible timeline, while preserving stable coordinates during handle/clip drags.
 - **Faster clip dragging:** Reduced the hold delay before picking up a clip from 350 ms to 220 ms.
-- **Regression coverage:** Added and updated tests for Tab navigation and edge previews, clip movement at in/out points and sequence bounds, typed-character/keypad/dash handling, bracket trimming with Option and repeat/help guards, number jumps, zoom following and minimum visible clip size.
+- **Regression coverage:** Added and updated tests for Tab navigation and edge previews, clip movement at in/out points and sequence bounds, typed-character/keypad/dash handling, bracket trimming, help close/scroll behavior, recording, alias management, persistence, conflicts, configurable end jumps, number jumps, zoom following and minimum visible clip size.
 
 ### App-update tooling
 
