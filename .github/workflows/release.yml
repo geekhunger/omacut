@@ -1,0 +1,181 @@
+name: Build and release
+on:
+  push:
+    branches: [master, ci/cross-platform]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+permissions:
+  contents: read
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-2022
+          - name: linux-amd64
+            os: ubuntu-24.04
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+          - name: macos-arm64
+            os: macos-26
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 100
+    env:
+      QT_QUICK_BACKEND: software
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ dpkg-dev qt6-base-dev qt6-declarative-dev qt6-multimedia-dev dbus-x11 xvfb $(cat packaging/linux-runtime-dependencies.txt)
+          echo /usr/lib/qt6/bin >> "$GITHUB_PATH"
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install qt ffmpeg dbus
+          echo "$(brew --prefix qt)/bin" >> "$GITHUB_PATH"
+      - name: Configure MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
+        with:
+          arch: x64
+      - name: Install Windows Qt
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125
+        with:
+          version: '6.10.2'
+          arch: win64_msvc2022_64
+          modules: qtmultimedia qtimageformats qtshadertools
+          cache: true
+      - name: Install pinned Windows FFmpeg
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $spec = Get-Content packaging/windows-ffmpeg.json | ConvertFrom-Json
+          Invoke-WebRequest $spec.url -OutFile "$env:RUNNER_TEMP/ffmpeg.zip"
+          if ((Get-FileHash "$env:RUNNER_TEMP/ffmpeg.zip" -Algorithm SHA256).Hash.ToLower() -ne $spec.sha256) { throw 'FFmpeg checksum mismatch' }
+          Expand-Archive "$env:RUNNER_TEMP/ffmpeg.zip" "$env:RUNNER_TEMP/ffmpeg"
+          $ff = (Get-ChildItem "$env:RUNNER_TEMP/ffmpeg" -Directory | Select-Object -First 1).FullName
+          "$ff/bin" >> $env:GITHUB_PATH
+          "OMACUT_FFMPEG_DIR=$ff" >> $env:GITHUB_ENV
+      - name: Configure and build Windows/Linux
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel 3
+      - name: Test Linux
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p validation/bin validation/src
+          QT_QPA_PLATFORM=offscreen ./build/backend_tests -o validation/tests.txt,txt -o validation/tests.xml,junitxml
+          cp build/backend_tests validation/bin/
+          cp src/*.qml src/*.js validation/src/
+      - name: Test Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force validation/bin, validation/src
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          & build/Release/backend_tests.exe -o validation/tests.txt,txt -o validation/tests.xml,junitxml
+          if ($LASTEXITCODE -ne 0) { throw "Tests failed: $LASTEXITCODE" }
+          Copy-Item build/Release/backend_tests.exe validation/bin/
+          Copy-Item src/*.qml, src/*.js validation/src/
+      - name: Build and test macOS
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p validation
+          bin/build
+          QT_QPA_PLATFORM=offscreen bin/test -o "$PWD/validation/tests.txt",txt -o "$PWD/validation/tests.xml",junitxml
+      - name: Package Windows/Linux
+        if: runner.os != 'macOS'
+        run: python bin/ci-package
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: |
+          bin/release-macos
+          mkdir -p release-assets
+          cp dist/*.zip dist/*.dmg dist/*sources.tar.gz release-assets/
+          echo "$PWD/dist/Omacut.app/Contents/MacOS/omacut" > dist/packaged-executable.txt
+      - name: Generate smoke input
+        shell: bash
+        run: ffmpeg -y -v error -f lavfi -i testsrc2=size=320x180:rate=25 -f lavfi -i sine=frequency=880 -t 2.4 -c:v libx264 -pix_fmt yuv420p -c:a aac validation/input.mp4
+      - name: Smoke test packaged Linux app
+        if: runner.os == 'Linux'
+        run: |
+          EXE=$(cat dist/packaged-executable.txt)
+          dbus-run-session -- xvfb-run -a "$EXE" --smoke-test --smoke-input "$PWD/validation/input.mp4" --smoke-output "$PWD/validation/export.mp4" --smoke-report "$PWD/validation/smoke.json"
+      - name: Smoke test packaged macOS app
+        if: runner.os == 'macOS'
+        run: |
+          EXE=$(cat dist/packaged-executable.txt)
+          QT_QPA_PLATFORM=offscreen "$EXE" --smoke-test --smoke-input "$PWD/validation/input.mp4" --smoke-output "$PWD/validation/export.mp4" --smoke-report "$PWD/validation/smoke.json"
+      - name: Smoke test packaged Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Get-Content dist/packaged-executable.txt
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          # A GUI executable must be awaited explicitly in PowerShell.
+          $args = "--smoke-test --smoke-input `"$PWD/validation/input.mp4`" --smoke-output `"$PWD/validation/export.mp4`" --smoke-report `"$PWD/validation/smoke.json`""
+          $p = Start-Process $exe -ArgumentList $args -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Smoke process failed: $($p.ExitCode)" }
+          $report = Get-Content validation/smoke.json | ConvertFrom-Json
+          if (!$report.ok) { throw 'Smoke report failed' }
+          Copy-Item validation/bin/backend_tests.exe (Split-Path $exe)
+      - name: Create candidate checksums
+        shell: python
+        run: |
+          import hashlib, pathlib
+          files = sorted(pathlib.Path('release-assets').iterdir())
+          pathlib.Path('release-assets/SHA256SUMS-${{ matrix.name }}.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in files if p.is_file()))
+      - name: Upload tested candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: candidate-${{ matrix.name }}
+          path: |
+            release-assets/
+            validation/
+          if-no-files-found: error
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: failed-${{ matrix.name }}
+          path: validation/
+          if-no-files-found: ignore
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: candidate-*
+          path: candidates
+      - name: Publish all tested binaries without deleting existing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        shell: bash
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --title "Omacut $RELEASE_TAG" --generate-notes
+          fi
+          find candidates -type f -path '*/release-assets/*' -print0 | xargs -0 gh release upload "$RELEASE_TAG" --clobber

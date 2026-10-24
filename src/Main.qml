@@ -1253,6 +1253,21 @@ ApplicationWindow {
                     contentHeight: helpColumn.height
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
+                    WheelHandler {
+                        target: null
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onWheel: function(event) {
+                            // Keep macOS natural scrolling and trackpad momentum;
+                            // make the long list a little quicker to browse.
+                            const delta = event.pixelDelta.y !== 0
+                                ? event.pixelDelta.y : event.angleDelta.y / 120 * 72;
+                            shortcutList.cancelFlick();
+                            const maxY = Math.max(0, shortcutList.contentHeight - shortcutList.height);
+                            shortcutList.contentY = Math.max(0, Math.min(maxY,
+                                shortcutList.contentY - delta * 1.4));
+                            event.accepted = true;
+                        }
+                    }
                     ScrollBar.vertical: ScrollBar {
                         id: shortcutScrollBar
                         width: 10

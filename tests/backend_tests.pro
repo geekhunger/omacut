@@ -1,4 +1,4 @@
-QT += core gui quick quickcontrols2 multimedia testlib dbus
+QT += core gui quick quickcontrols2 multimedia testlib widgets
 CONFIG += c++17 testcase
 TARGET = backend_tests
 TEMPLATE = app
@@ -12,7 +12,6 @@ HEADERS += \
     ../src/edit.h \
     ../src/ffmpeg.h \
     ../src/filepicker.h \
-    ../src/portalfilepicker.h \
     ../src/thumbprovider.h \
     ../src/timeline.h \
 
@@ -21,7 +20,6 @@ SOURCES += \
     ../src/backend.cpp \
     ../src/edit.cpp \
     ../src/ffmpeg.cpp \
-    ../src/portalfilepicker.cpp \
     ../src/thumbprovider.cpp \
     ../src/timeline.cpp \
 
@@ -30,4 +28,14 @@ macx {
     OBJECTIVE_SOURCES += ../src/macfilepicker.mm
     QMAKE_OBJECTIVE_CXXFLAGS += -fobjc-arc
     LIBS += -framework AppKit -framework UniformTypeIdentifiers
+}
+
+!win32 {
+    QT += dbus
+    HEADERS += ../src/portalfilepicker.h
+    SOURCES += ../src/portalfilepicker.cpp
+}
+!macx {
+    HEADERS += ../src/desktopfilepicker.h
+    SOURCES += ../src/desktopfilepicker.cpp
 }

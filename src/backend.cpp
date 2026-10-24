@@ -19,9 +19,18 @@
 #include <utility>
 
 #include "filepicker.h"
-#include "portalfilepicker.h"
 #ifdef Q_OS_MACOS
 #include "macfilepicker.h"
+#else
+#include "desktopfilepicker.h"
+#endif
+#ifdef QT_DBUS_LIB
+#include "portalfilepicker.h"
+#include <QDBusConnection>
+#include <QDBusConnectionInterface>
+#endif
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
 #endif
 #include "thumbprovider.h"
 
@@ -48,18 +57,34 @@ QString mp4PathFor(const QString &path) {
 }
 
 bool replaceWithTemp(const QString &tmpPath, const QString &outPath) {
+#ifdef Q_OS_WIN
+    return MoveFileExW(reinterpret_cast<LPCWSTR>(tmpPath.utf16()),
+                       reinterpret_cast<LPCWSTR>(outPath.utf16()),
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
     const QByteArray tmpName = QFile::encodeName(tmpPath);
     const QByteArray outName = QFile::encodeName(outPath);
     return std::rename(tmpName.constData(), outName.constData()) == 0;
+#endif
+}
+
+FilePicker *platformFilePicker() {
+#ifdef Q_OS_MACOS
+    return new MacFilePicker;
+#else
+#ifdef QT_DBUS_LIB
+    auto *bus = QDBusConnection::sessionBus().interface();
+    if (bus && (bus->isServiceRegistered(QStringLiteral("org.freedesktop.portal.Desktop")).value()
+                || bus->startService(QStringLiteral("org.freedesktop.portal.Desktop")).isValid()))
+        return new PortalFilePicker;
+#endif
+    return new DesktopFilePicker;
+#endif
 }
 }
 
 Backend::Backend(ThumbProvider *provider, QObject *parent)
-#ifdef Q_OS_MACOS
-    : Backend(provider, new MacFilePicker(), parent) {}
-#else
-    : Backend(provider, new PortalFilePicker(), parent) {}
-#endif
+    : Backend(provider, platformFilePicker(), parent) {}
 
 Backend::Backend(ThumbProvider *provider, FilePicker *filePicker, QObject *parent)
     : QObject(parent), m_provider(provider), m_filePicker(filePicker),

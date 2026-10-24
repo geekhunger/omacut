@@ -1,9 +1,11 @@
 #include <QtTest>
 
+#ifdef QT_DBUS_LIB
 #include <QDBusConnection>
 #include <QDBusContext>
 #include <QDBusMessage>
 #include <QDBusObjectPath>
+#endif
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDragLeaveEvent>
@@ -30,9 +32,12 @@
 #include "clipmovekeys.h"
 #include "shortcutsettings.h"
 #include "filepicker.h"
+#ifdef QT_DBUS_LIB
 #include "portalfilepicker.h"
+#endif
 #include "thumbprovider.h"
 
+#ifdef QT_DBUS_LIB
 // A fake org.freedesktop.portal.Request: only Close() matters here.
 class FakePortalRequest : public QObject {
     Q_OBJECT
@@ -85,6 +90,8 @@ public slots:
         return QDBusObjectPath(currentPath);
     }
 };
+
+#endif
 
 class FakeFilePicker : public FilePicker {
     Q_OBJECT
@@ -225,6 +232,8 @@ static QPoint itemCenter(QQuickItem *item) {
 }
 
 static QString mainQmlPath() {
+    const QString packaged = QDir(QCoreApplication::applicationDirPath()).filePath("../src/Main.qml");
+    if (QFileInfo::exists(packaged)) return packaged;
     return QFileInfo(QString::fromUtf8(__FILE__)).dir().absoluteFilePath(
         QStringLiteral("../src/Main.qml"));
 }
@@ -395,7 +404,11 @@ QString BackendTests::formatName(const QString &path) const {
 // Drop an "ffmpeg" into dirPath that always fails to start (its shebang points
 // nowhere), for tests that prepend dirPath to PATH.
 bool BackendTests::installBrokenFfmpeg(const QString &dirPath) {
+#ifdef Q_OS_WIN
+    QFile fake(QDir(dirPath).filePath(QStringLiteral("ffmpeg.exe")));
+#else
     QFile fake(QDir(dirPath).filePath(QStringLiteral("ffmpeg")));
+#endif
     if (!fake.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return false;
     fake.write("#!/definitely/missing/omacut-ffmpeg\n");
@@ -601,6 +614,10 @@ void BackendTests::probeReadsStreamedWebmAndSkipsCoverArt() {
 }
 
 void BackendTests::probeRunsOffTheUiThread() {
+#ifdef Q_OS_WIN
+    QSKIP("POSIX shell/sleep fixture; real FFmpeg probe, thumbnail and export tests run on Windows.");
+#endif
+
     // A slow ffprobe (a streamed file with no header duration is the real
     // case) must not freeze the caller: load() accepts, busy() reports the
     // probe in flight, and the refusal arrives later as a signal.
@@ -657,6 +674,10 @@ void BackendTests::thumbProviderServesAndCachesFrames() {
 }
 
 void BackendTests::thumbProviderStopsBlockedJobs() {
+#ifdef Q_OS_WIN
+    QSKIP("POSIX shell/sleep fixture; real FFmpeg probe, thumbnail and export tests run on Windows.");
+#endif
+
     const QString sleepBin = QStandardPaths::findExecutable(QStringLiteral("sleep"));
     QVERIFY2(!sleepBin.isEmpty(), "sleep is available");
 
@@ -688,6 +709,10 @@ void BackendTests::thumbProviderStopsBlockedJobs() {
 }
 
 void BackendTests::thumbProviderCancelsRunningJobs() {
+#ifdef Q_OS_WIN
+    QSKIP("POSIX shell/sleep fixture; real FFmpeg probe, thumbnail and export tests run on Windows.");
+#endif
+
     const QString sleepBin = QStandardPaths::findExecutable(QStringLiteral("sleep"));
     QVERIFY2(!sleepBin.isEmpty(), "sleep is available");
 
@@ -1219,7 +1244,7 @@ void BackendTests::exportStartFailureClearsBusy() {
     QVERIFY(installBrokenFfmpeg(pathDir.path()));
 
     EnvVarGuard pathGuard("PATH");
-    qputenv("PATH", QFile::encodeName(pathDir.path()) + ':' + qgetenv("PATH"));
+    qputenv("PATH", QFile::encodeName(pathDir.path()) + QDir::listSeparator().toLatin1() + qgetenv("PATH"));
 
     backend.exportClips(QUrl::fromLocalFile(m_dir.filePath(QStringLiteral("failed.mp4"))),
                         wholeVideo(1.0));
@@ -1257,7 +1282,7 @@ void BackendTests::failedExportPreservesExistingFile() {
     QVERIFY(installBrokenFfmpeg(pathDir.path()));
 
     EnvVarGuard pathGuard("PATH");
-    qputenv("PATH", QFile::encodeName(pathDir.path()) + ':' + qgetenv("PATH"));
+    qputenv("PATH", QFile::encodeName(pathDir.path()) + QDir::listSeparator().toLatin1() + qgetenv("PATH"));
 
     backend.exportClips(QUrl::fromLocalFile(outPath), wholeVideo(1.0));
     QTRY_COMPARE_WITH_TIMEOUT(failedSpy.count(), 1, 5000);
@@ -2751,6 +2776,9 @@ void BackendTests::qmlDropTakesOnlyLocalFiles() {
 }
 
 void BackendTests::portalPickerReplacesAnUnansweredRequest() {
+#ifndef QT_DBUS_LIB
+    QSKIP("D-Bus portals are not a Windows platform dependency.");
+#else
     // The picker talks to whatever DBUS_SESSION_BUS_ADDRESS named when this
     // process first touched the session bus, and by the time a test runs
     // that is the real bus, where a real portal owns the name. So the
@@ -2837,6 +2865,7 @@ void BackendTests::portalPickerReplacesAnUnansweredRequest() {
         QStringLiteral("/org/freedesktop/portal/desktop"));
     QDBusConnection::sessionBus().unregisterService(
         QStringLiteral("org.freedesktop.portal.Desktop"));
+#endif
 }
 
 QTEST_MAIN(BackendTests)

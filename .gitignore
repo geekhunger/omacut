@@ -1,5 +1,8 @@
 /build/
 /dist/
+/release-assets/
+/validation/
+aqtinstall.log
 __pycache__/
 .DS_Store
 *.o

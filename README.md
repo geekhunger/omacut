@@ -127,7 +127,7 @@ Open the shortcut panel with `?` or the **?** button. Every configured shortcut 
 
 `Remove clip` starts with **X**, **Delete** and **Backspace**. `Move the clip earlier` starts with **-**, **−**, **–** and **—**. Each alternative can be changed or removed independently.
 
-The help panel has a top-right **X** button and a scrollable list with a pill-shaped scrollbar and track. Its default close shortcut is **X** while the panel is open. Clicking outside the panel leaves it open and cancels any pending shortcut recording.
+The help panel has a top-right **X** button and a scrollable list with a pill-shaped scrollbar and track. Trackpad and mouse-wheel scrolling is accelerated for quicker browsing. Its default close shortcut is **X** while the panel is open. Clicking outside the panel leaves it open and cancels any pending shortcut recording.
 
 ## Install
 
@@ -169,7 +169,7 @@ MIT. See `LICENSE`.
 
 Compared with [the original Omacut](https://github.com/omacom/omacut) at upstream
 commit `612215e2f7f0856ec48fdcaff73bd22d4be7899f`, this fork contains the following
-customizations. They are included in the
+customizations, including the macOS port itself. They are included in the
 `v0.7.3-macos.1` source tag and macOS downloads.
 
 ### macOS port and release tooling

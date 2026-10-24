@@ -68,6 +68,14 @@ double probePacketDuration(const QString &ffprobe, const QString &path, int stre
 }
 
 QString toolPath(const QString &tool) {
+#ifdef Q_OS_WIN
+    const QString filename = tool + QStringLiteral(".exe");
+#else
+    const QString filename = tool;
+#endif
+    const QString besideApp = QDir(QCoreApplication::applicationDirPath()).filePath(filename);
+    if (QFileInfo(besideApp).isExecutable())
+        return besideApp;
 #ifdef Q_OS_MACOS
     const QString bundled = QDir(QCoreApplication::applicationDirPath()).filePath("../Helpers/" + tool);
     if (QFileInfo(bundled).isExecutable())

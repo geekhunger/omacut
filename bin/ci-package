@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Create candidates; this script never publishes or changes an installed app."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import shutil
+import subprocess
+import zipfile
+
+ROOT = Path(__file__).resolve().parent.parent
+VERSION = "0.7.4"
+DIST = ROOT / "dist"
+RELEASE = ROOT / "release-assets"
+
+def run(*args, **kwargs):
+    return subprocess.run([str(a) for a in args], check=True, **kwargs)
+
+def linux(build):
+    arch = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
+    stage = DIST / "deb-root"
+    run("cmake", "--install", build, "--prefix", "/usr", env={**os.environ, "DESTDIR": str(stage)})
+    control_dir = stage / "DEBIAN"
+    control_dir.mkdir(parents=True)
+    meta = DIST / "shlib-meta"
+    (meta / "debian").mkdir(parents=True, exist_ok=True)
+    (meta / "debian/control").write_text("Source: omacut\nSection: video\nPriority: optional\nMaintainer: Omacut community fork <noreply@github.com>\n\nPackage: omacut\nArchitecture: any\nDescription: Keyboard-driven video editor\n")
+    depends = subprocess.check_output(["dpkg-shlibdeps", "-O", "-e" + str(stage / "usr/bin/omacut")], cwd=meta, text=True).strip().split("=", 1)[1]
+    runtime = (ROOT / "packaging/linux-runtime-dependencies.txt").read_text().split()
+    depends += ", " + ", ".join(runtime)
+    (control_dir / "control").write_text(f"Package: omacut\nVersion: {VERSION}\nSection: video\nPriority: optional\nArchitecture: {arch}\nMaintainer: Omacut community fork <noreply@github.com>\nDepends: {depends}\nHomepage: https://github.com/geekhunger/omacut\nDescription: Keyboard-driven video editor\n Trim, split, arrange and export videos using Qt and FFmpeg.\n")
+    copyright_file = stage / "usr/share/doc/omacut/copyright"
+    copyright_file.write_text((ROOT / "LICENSE").read_text())
+    run("dpkg-deb", "--root-owner-group", "--build", stage, RELEASE / f"Omacut-{VERSION}-linux-{arch}.deb")
+    (RELEASE / f"linux-{arch}-dependencies.txt").write_text(depends + "\n")
+    return stage / "usr/bin/omacut"
+
+def windows(build):
+    name = f"Omacut-{VERSION}-windows-x64"
+    stage = DIST / name
+    stage.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(build / "Release/omacut.exe", stage)
+    qt = Path(os.environ["QT_ROOT_DIR"])
+    run(qt / "bin/windeployqt.exe", "--release", "--qmldir", ROOT / "src", "--no-translations", "--compiler-runtime", "--dir", stage, stage / "omacut.exe")
+    # MSVC's app-local runtime avoids an admin-only VC++ redistributable install.
+    redist = os.environ.get("VCToolsRedistDir")
+    if redist:
+        for dll in (Path(redist) / "x64/Microsoft.VC143.CRT").glob("*.dll"):
+            shutil.copy2(dll, stage)
+    ffmpeg = Path(os.environ["OMACUT_FFMPEG_DIR"])
+    for exe in ("ffmpeg.exe", "ffprobe.exe"):
+        shutil.copy2(ffmpeg / "bin" / exe, stage)
+    licenses = stage / "licenses"
+    licenses.mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "LICENSE", licenses / "Omacut-MIT.txt")
+    shutil.copy2(ROOT / "packaging/windows-ffmpeg.json", licenses)
+    for directory in ("doc", "licenses"):
+        if (ffmpeg / directory).exists():
+            shutil.copytree(ffmpeg / directory, licenses / ("ffmpeg-" + directory), dirs_exist_ok=True)
+    if (qt / "Licenses").exists():
+        shutil.copytree(qt / "Licenses", licenses / "qt", dirs_exist_ok=True)
+    (stage / "qt.conf").write_text("[Paths]\nPrefix=.\nPlugins=.\nQmlImports=qml\n")
+    (stage / "README.txt").write_text("Omacut community fork for Windows x64.\nExtract the complete folder and run omacut.exe. Qt, the MSVC runtime, FFmpeg\nand ffprobe are included. No Python, Qt SDK or separate FFmpeg install is needed.\nThe executable is not Authenticode signed.\nSource and build recipes: https://github.com/geekhunger/omacut\nFFmpeg build provenance and licenses: licenses/\n")
+    shutil.make_archive(str(RELEASE / name), "zip", DIST, name)
+    return stage / "omacut.exe"
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--build", type=Path, default=ROOT / "build")
+    args = parser.parse_args()
+    DIST.mkdir(exist_ok=True)
+    RELEASE.mkdir(exist_ok=True)
+    executable = windows(args.build.resolve()) if platform.system() == "Windows" else linux(args.build.resolve())
+    (DIST / "packaged-executable.txt").write_text(str(executable))
+    (RELEASE / ("build-info-" + platform.system().lower() + "-" + platform.machine() + ".json")).write_text(json.dumps({
+        "version": VERSION, "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "platform": platform.platform(), "executable": executable.name,
+        "qt": subprocess.check_output(["qmake", "-query", "QT_VERSION"], text=True).strip(),
+    }, indent=2) + "\n")

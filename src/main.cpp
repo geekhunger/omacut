@@ -1,6 +1,6 @@
 // omacut — a dead-simple video length trimmer. Qt Quick (QML) UI, ffmpeg cuts.
 
-#include <QGuiApplication>
+#include <QApplication>
 #include <QFileInfo>
 #include <QIcon>
 #include <QQmlApplicationEngine>
@@ -8,23 +8,25 @@
 #include <QQuickStyle>
 #include <QUrl>
 #include <QFileOpenEvent>
+#include <QTemporaryDir>
 #include <functional>
 
 #include "backend.h"
 #include "clipmovekeys.h"
 #include "shortcutsettings.h"
 #include "thumbprovider.h"
+#include "smoke.h"
 
-class OmacutApplication : public QGuiApplication {
+class OmacutApplication : public QApplication {
 public:
-    using QGuiApplication::QGuiApplication;
+    using QApplication::QApplication;
     std::function<void(const QUrl &)> openFile;
     bool event(QEvent *event) override {
         if (event->type() == QEvent::FileOpen && openFile) {
             openFile(static_cast<QFileOpenEvent *>(event)->url());
             return true;
         }
-        return QGuiApplication::event(event);
+        return QApplication::event(event);
     }
 };
 
@@ -33,14 +35,14 @@ int main(int argc, char *argv[]) {
     // and on GPUs without Vulkan decode queues it then picks ffmpeg's hwaccel-only
     // av1 decoder and never falls back to dav1d, leaving the preview black. Stick
     // to the backends Qt checks codec support for, so software decode kicks in.
-#ifndef Q_OS_MACOS
+#ifdef Q_OS_LINUX
     if (!qEnvironmentVariableIsSet("QT_FFMPEG_DECODING_HW_DEVICE_TYPES"))
         qputenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", "vaapi,cuda");
 #endif
 
     OmacutApplication app(argc, argv);
     app.setApplicationName("omacut");
-    app.setApplicationVersion("0.7.3");
+    app.setApplicationVersion("0.7.4");
 
     // Associates the window with omacut.desktop so the compositor (Wayland app_id
     // = this name) and taskbars pick up our installed icon.
@@ -53,7 +55,10 @@ int main(int argc, char *argv[]) {
     auto *provider = new ThumbProvider();
     Backend backend(provider, &app);
 
-    ShortcutSettings shortcutStore;
+    const QStringList args = app.arguments();
+    const bool smoke = args.contains(QStringLiteral("--smoke-test"));
+    QTemporaryDir smokeSettings;
+    ShortcutSettings shortcutStore(smoke ? smokeSettings.filePath("shortcuts.ini") : QString());
     QQmlApplicationEngine engine;
 
     // The engine takes ownership of the image provider.
@@ -74,8 +79,9 @@ int main(int argc, char *argv[]) {
     };
 
     // Optionally open a file passed on the command line.
-    const QStringList args = app.arguments();
-    if (args.size() > 1)
+    if (smoke)
+        startSmokeTest(backend, engine, args);
+    else if (args.size() > 1)
         backend.load(QUrl::fromLocalFile(QFileInfo(args.at(1)).absoluteFilePath()));
 
     return app.exec();

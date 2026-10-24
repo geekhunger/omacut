@@ -1,14 +1,14 @@
-QT += core gui qml quick quickcontrols2 multimedia dbus
+QT += core gui qml quick quickcontrols2 multimedia widgets
 
 CONFIG += c++17 release
 TARGET = omacut
 TEMPLATE = app
 
 HEADERS += \
+    src/smoke.h \
     src/shortcutsettings.h \
     src/clipmovekeys.h \
     src/filepicker.h \
-    src/portalfilepicker.h \
     src/edit.h \
     src/ffmpeg.h \
     src/thumbprovider.h \
@@ -16,8 +16,8 @@ HEADERS += \
     src/backend.h
 
 SOURCES += \
+    src/smoke.cpp \
     src/main.cpp \
-    src/portalfilepicker.cpp \
     src/edit.cpp \
     src/ffmpeg.cpp \
     src/thumbprovider.cpp \
@@ -34,4 +34,14 @@ macx {
     LIBS += -framework AppKit -framework UniformTypeIdentifiers
     ICON = packaging/Omacut.icns
     QMAKE_INFO_PLIST = packaging/Info.plist
+}
+
+!win32 {
+    QT += dbus
+    HEADERS += src/portalfilepicker.h
+    SOURCES += src/portalfilepicker.cpp
+}
+!macx {
+    HEADERS += src/desktopfilepicker.h
+    SOURCES += src/desktopfilepicker.cpp
 }
