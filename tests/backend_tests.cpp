@@ -11,6 +11,8 @@
 #include <QDragLeaveEvent>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QMediaDevices>
+#include <QAudioDevice>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QImage>
@@ -242,12 +244,13 @@ static QString mainQmlPath() {
 // as the window is in use, so each shortcut test is just the key presses.
 class QmlHarness {
 public:
-    explicit QmlHarness(QObject &backend, const QString &settingsFile = {}) {
+    explicit QmlHarness(QObject &backend, const QString &settingsFile = {}, const QVariantMap &initial = {}) {
         m_shortcutStore = std::make_unique<ShortcutSettings>(
             settingsFile.isEmpty() ? m_settingsDir.filePath(QStringLiteral("shortcuts.ini")) : settingsFile);
         m_engine.addImageProvider(QStringLiteral("thumbs"), new ThumbProvider);
         m_engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
         m_engine.rootContext()->setContextProperty(QStringLiteral("shortcutStore"), m_shortcutStore.get());
+        m_engine.setInitialProperties(initial);
         m_engine.load(QUrl::fromLocalFile(mainQmlPath()));
         if (!m_engine.rootObjects().isEmpty())
             m_window = qobject_cast<QQuickWindow *>(m_engine.rootObjects().first());
@@ -302,6 +305,7 @@ private slots:
     void exportStartFailureClearsBusy();
     void failedExportPreservesExistingFile();
     void qmlDoesNotCreateAudioOutputWithoutVideo();
+    void qmlDoesNotCreateAudioOutputWithoutDevice();
     void qmlShortcutsTriggerBackendActions();
     void qmlArrowKeysMoveThePlayhead();
     void qmlNumberKeysJumpThroughTheEdit();
@@ -1305,6 +1309,19 @@ void BackendTests::qmlDoesNotCreateAudioOutputWithoutVideo() {
     QCOMPARE(harness.window()->property("audioOutputReady").toBool(), false);
 }
 
+void BackendTests::qmlDoesNotCreateAudioOutputWithoutDevice() {
+    ShortcutBackend backend(QUrl::fromLocalFile(m_dir.filePath(QStringLiteral("no-audio.mp4"))), 1.0);
+    QmlHarness harness(backend, {}, {{QStringLiteral("audioDevices"),
+        QVariantMap{{QStringLiteral("audioOutputs"), QVariantList{}}}}});
+    QVERIFY(harness.window());
+    QVERIFY(QMetaObject::invokeMethod(harness.window(), "ensureAudioOutput"));
+    QCOMPARE(harness.window()->property("audioOutputReady").toBool(), false);
+    // The keyboard/editor remain usable without constructing a failing sink.
+    harness.editBar()->setProperty("playheadSec", 0.5);
+    QTest::keyClick(harness.window(), Qt::Key_S);
+    QTRY_COMPARE(backend.timeline.clips().size(), 2);
+}
+
 void BackendTests::qmlShortcutsTriggerBackendActions() {
     ShortcutBackend backend(QUrl::fromLocalFile(m_dir.filePath(QStringLiteral("shortcut-placeholder.mp4"))),
                             1.0);
@@ -1312,7 +1329,8 @@ void BackendTests::qmlShortcutsTriggerBackendActions() {
 
     QVERIFY2(harness.window(), qPrintable(mainQmlPath()));
     QQuickWindow *window = harness.window();
-    QTRY_VERIFY_WITH_TIMEOUT(window->property("audioOutputReady").toBool(), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(window->property("audioOutputReady").toBool(),
+                             !QMediaDevices::audioOutputs().isEmpty(), 3000);
 
     window->show();
     window->requestActivate();

@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Collect the matching source archives, build formulas, patches and notices."""
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import tarfile
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
@@ -25,6 +28,39 @@ def fetch(url, path, checksum=None):
         path.unlink()
         raise RuntimeError("Source checksum mismatch: " + url)
     return {"url": url, "file": str(path.relative_to(DEST)), "sha256": digest}
+
+
+def installed_formula_revision(name, prefix, formula, info):
+    """Find an immutable tap revision matching the recipe actually installed."""
+    installed_hash = hashlib.sha256(formula.read_bytes()).hexdigest()
+    receipt = json.loads((prefix / "INSTALL_RECEIPT.json").read_text())
+    formula_path = info.get("ruby_source_path") or f"Formula/{name[0]}/{name}.rb"
+    def normalized(source):
+        # A bottle's embedded recipe omits the bottle block describing that
+        # bottle itself. All build options, patches and source text must match.
+        return re.sub(r"\n  bottle do\n.*?^  end\n", "", source, flags=re.M | re.S)
+    def matches(rev):
+        with urlopen(f"https://raw.githubusercontent.com/Homebrew/homebrew-core/{rev}/{formula_path}", timeout=30) as response:
+            return normalized(response.read().decode()) == normalized(formula.read_text())
+    revision = info.get("tap_git_head")
+    if revision and (info.get("ruby_source_checksum", {}).get("sha256") == installed_hash or matches(revision)):
+        return revision
+    revision = receipt.get("source", {}).get("tap_git_head")
+    if revision and matches(revision): return revision
+    # API-installed bottles often omit tap_git_head. Resolve history at the
+    # installation time and verify the full recipe. source_modified_time is the
+    # upstream tarball's timestamp, which can predate later security patches.
+    timestamp = receipt["time"]
+    until = datetime.fromtimestamp(timestamp + 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    url = f"https://api.github.com/repos/Homebrew/homebrew-core/commits?path={formula_path}&until={until}&per_page=10"
+    headers = {"Accept": "application/vnd.github+json"}
+    if os.environ.get("GH_TOKEN"):
+        headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
+    with urlopen(Request(url, headers=headers), timeout=30) as response:
+        commits = json.load(response)
+    for commit in commits:
+        if matches(commit["sha"]): return commit["sha"]
+    raise RuntimeError("Could not resolve matching installed patch recipe for " + name)
 
 
 def collect(dep):
@@ -67,10 +103,13 @@ def collect(dep):
     # Homebrew formulas may include both embedded DATA patches and patch files.
     if "__END__" in text:
         (dest / "homebrew-data.patch").write_text(text.split("__END__", 1)[1].lstrip())
-    for patch in re.findall(r'file "(Patches/[^"]+)"', text):
+    patches = re.findall(r'file "(Patches/[^"]+)"', text)
+    if patches:
         info = json.loads(subprocess.check_output([str(BREW / "bin/brew"), "info", "--json=v2", name], text=True))["formulae"][0]
-        checksum = info["local_patch_checksums"][patch]
-        records.append(fetch("https://raw.githubusercontent.com/Homebrew/homebrew-core/HEAD/" + patch, dest / Path(patch).name, checksum))
+        revision = installed_formula_revision(name, prefix, formula, info)
+    for patch in patches:
+        checksum = info.get("local_patch_checksums", {}).get(patch) if revision == info.get("tap_git_head") else None
+        records.append(fetch("https://raw.githubusercontent.com/Homebrew/homebrew-core/" + revision + "/" + patch, dest / Path(patch).name, checksum))
     notices = LICENSES / name / "source-notices"
     notices.mkdir(parents=True, exist_ok=True)
     for record in records:

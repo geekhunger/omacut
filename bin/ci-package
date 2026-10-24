@@ -8,6 +8,7 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
+import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,6 +57,23 @@ def windows(build):
     licenses.mkdir(exist_ok=True)
     shutil.copy2(ROOT / "LICENSE", licenses / "Omacut-MIT.txt")
     shutil.copy2(ROOT / "packaging/windows-ffmpeg.json", licenses)
+    source_spec = json.loads((ROOT / "packaging/windows-sources.json").read_text())
+    qt_version = subprocess.check_output([str(qt / "bin/qmake.exe"), "-query", "QT_VERSION"], text=True).strip()
+    if qt_version != source_spec["qt_version"]:
+        raise RuntimeError("Qt source/notices manifest does not match the SDK")
+    for notice in source_spec["notices"]:
+        archive = DIST / notice["file"]
+        urllib.request.urlretrieve(notice["url"], archive)
+        if hashlib.sha256(archive.read_bytes()).hexdigest() != notice["sha256"]:
+            raise RuntimeError("Notice checksum mismatch: " + notice["file"])
+        with zipfile.ZipFile(archive) as z:
+            z.extractall(licenses / notice["directory"])
+    manifest_data = urllib.request.urlopen(source_spec["source_manifest"]["url"], timeout=60).read()
+    if hashlib.sha256(manifest_data).hexdigest() != source_spec["source_manifest"]["sha256"]:
+        raise RuntimeError("Source manifest checksum mismatch")
+    (licenses / "Windows-Dependency-Sources.json").write_bytes(manifest_data)
+    (RELEASE / "Windows-Dependency-Sources.json").write_bytes(manifest_data)
+    (licenses / "README.txt").write_text("Omacut is MIT licensed. Qt is dynamically linked; its complete license\nnotices are in qt/. The separate FFmpeg CLI is GPLv3; FFmpeg-GPL-3.0.txt\nand ffmpeg-dependencies/ contain its license and dependency notices.\nMatching Qt/FFmpeg sources, exact build recipes, dependency source cache\nparts, versions, public download URLs and SHA-256 checksums are listed in\nWindows-Dependency-Sources.json. Qt's LGPL FFmpeg runtime and the GPL\ncommand-line FFmpeg are distinct builds; both source sets are provided.\nCompatible replacement Qt DLLs may be placed beside the application.\n")
     for directory in ("doc", "licenses"):
         if (ffmpeg / directory).exists():
             shutil.copytree(ffmpeg / directory, licenses / ("ffmpeg-" + directory), dirs_exist_ok=True)

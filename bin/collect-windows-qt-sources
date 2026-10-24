@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Collect official Qt SDK sources and full notices for the pinned Windows SDK."""
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
+import json
+from pathlib import Path
+import re
+import tarfile
+import urllib.request
+import zipfile
+
+ROOT = Path(__file__).resolve().parent.parent
+VERSION = "6.10.2"
+DEST = ROOT / "dist/windows-qt-sources"
+NOTICES = ROOT / "dist/windows-qt-notices"
+MODULES = ("qtbase", "qtdeclarative", "qtmultimedia", "qtsvg", "qtimageformats", "qtshadertools", "qtquicktimeline")
+
+def download(url, dest, expected=None):
+    if not dest.exists():
+        urllib.request.urlretrieve(url, dest)
+    h = hashlib.sha256()
+    with dest.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            h.update(block)
+    digest = h.hexdigest()
+    if expected and expected != digest:
+        dest.unlink()
+        raise RuntimeError("Source checksum mismatch: " + url)
+    return {"url": url, "file": dest.name, "sha256": digest}
+
+def module(name):
+    filename = f"{name}-everywhere-src-{VERSION}.tar.xz"
+    url = f"https://download.qt.io/archive/qt/6.10/{VERSION}/submodules/{filename}"
+    expected = urllib.request.urlopen(url + ".sha256", timeout=30).read().decode().split()[0]
+    record = download(url, DEST / filename, expected)
+    print("Verified", filename, flush=True)
+    return record
+
+def notices(archive):
+    with tarfile.open(archive) as tar:
+        for member in tar:
+            if not member.isfile() or member.size > 3_000_000:
+                continue
+            path = Path(member.name)
+            if path.is_absolute() or ".." in path.parts:
+                raise RuntimeError("Unsafe source path")
+            if (re.search(r"licen[sc]e|copying|copyright|notice|authors|readme|^ftl\.txt$", path.name, re.I)
+                    or "LICENSES" in path.parts or path.name == "qt_attribution.json"):
+                target = NOTICES / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(tar.extractfile(member).read())
+
+if __name__ == "__main__":
+    DEST.mkdir(parents=True, exist_ok=True)
+    NOTICES.mkdir(parents=True, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        records = list(pool.map(module, MODULES))
+    # Qt's dynamic multimedia libraries are a different FFmpeg build from the
+    # separately shipped GPL command-line tools. Keep both source sets.
+    records.append(download("https://ffmpeg.org/releases/ffmpeg-7.1.2.tar.xz", DEST / "ffmpeg-7.1.2.tar.xz"))
+    records.append(download(f"https://codeload.github.com/qt/qt5/tar.gz/refs/tags/v{VERSION}", DEST / f"qt5-build-recipes-{VERSION}.tar.gz"))
+    for record in records:
+        notices(DEST / record["file"])
+    manifest = {"qt_version": VERSION, "ffmpeg_runtime_version": "7.1.2", "sources": records}
+    for directory in (DEST, NOTICES):
+        (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (DEST / "README.txt").write_text("Corresponding sources for the official Qt 6.10.2 MSVC 2022 x64 SDK.\nThe Qt module archives include their third-party sources, notices and licenses.\nQt's FFmpeg runtime is LGPL 7.1.2; these sources are separate from the GPL\nFFmpeg command-line build bundled with Omacut. The qt5 repository archive\ncontains Qt's coin/provisioning build recipes for the official binaries.\nOmacut dynamically links Qt: replacement compatible DLLs can be placed beside\nomacut.exe. MSVC runtime files come from Microsoft's redistributable directory.\nManifest SHA-256 hashes identify all downloaded archives; Qt module hashes\nwere checked against Qt's official .sha256 sidecars.\n")
+    source_archive = ROOT / f"dist/Qt-{VERSION}-windows-sources.tar"
+    with tarfile.open(source_archive, "w") as tar:
+        tar.add(DEST, arcname="qt-windows-sources")
+    with zipfile.ZipFile(ROOT / f"dist/Qt-{VERSION}-windows-notices.zip", "w", zipfile.ZIP_DEFLATED) as z:
+        for file in sorted(NOTICES.rglob("*")):
+            if file.is_file(): z.write(file, file.relative_to(NOTICES))
+    print("Collected matching Qt sources and complete notices", flush=True)

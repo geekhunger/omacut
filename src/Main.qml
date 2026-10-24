@@ -19,6 +19,7 @@ ApplicationWindow {
     readonly property color accentForeground: backend.themeAccentForeground
     readonly property bool audioOutputReady: audioOutput !== null
     property var audioOutput: null
+    property var audioDevices: null
     property string noticeText: ""
     property bool helpVisible: false
     property bool quitConfirmVisible: false
@@ -79,7 +80,14 @@ ApplicationWindow {
         backend.exportDialog();
     }
     function ensureAudioOutput() {
-        if (audioOutput === null && win.hasVideo)
+        if (!win.hasVideo)
+            return;
+        if (audioDevices === null)
+            audioDevices = audioDevicesComponent.createObject(win);
+        // A video editor also works without a sound card or audio server.
+        // In particular, GStreamer cannot attach a PulseAudio sink when the
+        // device list is empty; leaving audioOutput unset keeps video usable.
+        if (audioOutput === null && audioDevices.audioOutputs.length > 0)
             audioOutput = audioOutputComponent.createObject(win);
     }
     function releaseAudioOutput() {
@@ -839,13 +847,25 @@ ApplicationWindow {
     }
 
     Component {
+        id: audioDevicesComponent
+        MediaDevices {
+            onAudioOutputsChanged: {
+                if (!win.hasVideo)
+                    return;
+                if (audioOutputs.length === 0)
+                    win.releaseAudioOutput();
+                else
+                    Qt.callLater(win.ensureAudioOutput);
+            }
+        }
+    }
+    Component {
         id: audioOutputComponent
         AudioOutput {
             // Follows the system's default output as it changes, between
             // headphones, speakers, monitor audio, etc. Created with the
             // output, so nothing watches devices before a video is open.
-            property MediaDevices devices: MediaDevices {}
-            device: devices.defaultAudioOutput
+            device: win.audioDevices.defaultAudioOutput
             muted: player.priming
         }
     }

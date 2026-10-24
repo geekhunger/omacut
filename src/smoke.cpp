@@ -45,7 +45,8 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
         s->result.insert("exportStarted", s->exporting);
         const QByteArray json = QJsonDocument(s->result).toJson();
         QSaveFile report(s->report);
-        const bool saved = report.open(QIODevice::WriteOnly) && report.write(json) == json.size()
+        const bool saved = s->report != s->input && s->report != s->output
+                           && report.open(QIODevice::WriteOnly) && report.write(json) == json.size()
                            && report.commit();
         if (!saved) qCritical("Cannot write smoke report: %s", qPrintable(s->report));
         qInfo().noquote() << json;
@@ -84,8 +85,9 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
         qInfo("Smoke: input probe completed");
         s->result.insert("inputProbed", true);
         // Exercise normal playback as well as the first-frame priming path.
-        QTimer::singleShot(100, &engine, [&engine] {
-            QMetaObject::invokeMethod(engine.rootObjects().first(), "togglePlay");
+        QTimer::singleShot(100, &engine, [s, &engine] {
+            if (!s->preview && !s->exporting && !s->finished)
+                QMetaObject::invokeMethod(engine.rootObjects().first(), "togglePlay");
         });
         beginExport();
     });
@@ -132,7 +134,8 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
     });
     QTimer::singleShot(0, &engine, [s, &backend, player, finish] {
         if (s->report.isEmpty() || s->input.isEmpty() || s->output.isEmpty()
-            || s->input == s->output || !player || !player->videoSink()) {
+            || s->input == s->output || s->report == s->input || s->report == s->output
+            || !player || !player->videoSink()) {
             finish("Require --smoke-input, distinct --smoke-output, --smoke-report and a QML video sink");
             return;
         }

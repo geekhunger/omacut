@@ -14,10 +14,10 @@ macOS, Windows and Linux.
 | Windows | x64 portable ZIP | Windows 10 22H2 or Windows 11; Qt, FFmpeg and ffprobe included |
 | Linux | amd64 or arm64 `.deb` | Ubuntu 24.04; `apt` installs Qt, FFmpeg and the declared runtime dependencies |
 
-- Apple Silicon (arm64), macOS 26 or later. Intel Macs are not supported by this binary.
-- Qt, FFmpeg and FFprobe are included; Homebrew is not required to run the app.
-- Native macOS open/save dialogs, export-quality selection and opening videos from Finder.
-- Uses macOS video acceleration for preview where supported.
+- The macOS binary targets Apple Silicon (arm64), macOS 26 or later; Intel Macs are not included.
+- macOS and Windows downloads include Qt, FFmpeg and ffprobe. Homebrew is not required to run the Mac app.
+- The macOS port provides native open/save dialogs, export-quality selection and opening videos from Finder.
+- Preview uses the platform's video acceleration where supported.
 - Community build; not an official upstream release. Updates are manual.
 
 ### Install on macOS
@@ -195,7 +195,10 @@ cmake --build build --config Release --parallel
 Linux also needs Qt D-Bus. Install the QML/runtime packages listed in
 [`packaging/linux-runtime-dependencies.txt`](packaging/linux-runtime-dependencies.txt).
 Windows builds use MSVC 2022 and the matching x64 Qt SDK. The workflow pins
-the Windows Qt version and checksum-verifies the FFmpeg archive.
+the Windows Qt version and checksum-verifies the FFmpeg archive. The Windows
+packages include the full Qt/FFmpeg dependency notices and a manifest linking
+their matching sources, patches and build recipes in the retained
+[dependency archive](https://github.com/geekhunger/omacut/releases/tag/omacut-dependencies-windows-2026-10-24).
 
 Requirements:
 
@@ -237,6 +240,9 @@ Pushing a `v*` tag or publishing a GitHub release starts the workflow. Release
 assets are uploaded only after all four jobs succeed. Existing releases and
 unrelated assets are retained. Branch/PR runs produce candidates without
 publishing a release. See [the workflow](.github/workflows/release.yml).
+Its optional `promote_run` and `release_tag` inputs publish the exact artifacts
+from a successful four-platform run after checking the source commit and
+checksums, so packages can be tested on separate machines before publication.
 
 ## License
 
@@ -287,5 +293,6 @@ customizations, including the macOS port itself. This inventory describes the
 - **Linux desktop fallback:** Kept the portal picker when its service is available and added the Qt picker for desktops without a portal.
 - **Qt 6.4 compatibility:** Recreated the timeline handles' rounded outer edges without the corner-radius API introduced in later Qt versions, allowing Ubuntu 24.04's Qt to load the editor.
 - **Platform behavior:** Limited the Linux hardware-decoder restriction to Linux, displayed Ctrl on Windows/Linux and Cmd on macOS, and made export completion reach 100% even when FFmpeg's final progress timestamp falls short.
+- **Audio-device handling:** Kept device discovery lazy and created preview audio output only when an output device exists, so systems without an audio device can still edit video. Device changes are followed while the editor is open.
 - **Release automation:** Added CMake builds, a four-platform GitHub Actions matrix, a portable Windows ZIP and Ubuntu amd64/arm64 Debian packages with declared runtime dependencies. Existing macOS ZIP/DMG/source packaging is integrated into the same workflow.
 - **Packaged-app verification:** Added an isolated diagnostic mode that verifies actual video preview, editing and export; release upload requires every platform's tests and smoke check to succeed. Adapted platform-specific process fixtures while retaining the real FFmpeg and QML tests.

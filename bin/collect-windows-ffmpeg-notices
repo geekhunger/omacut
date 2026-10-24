@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Extract notices from the verified BtbN source cache and exact FFmpeg source."""
+import argparse
+from pathlib import Path
+import re
+import tarfile
+import zipfile
+
+ROOT = Path(__file__).resolve().parent.parent
+DEST = ROOT / "dist/windows-ffmpeg-notices"
+
+def collect(tar, component):
+    count = 0
+    for member in tar:
+        if not member.isfile() or member.size > 3_000_000:
+            continue
+        path = Path(member.name)
+        if path.is_absolute() or ".." in path.parts:
+            raise RuntimeError("Unsafe source path")
+        if (re.search(r"licen[sc]e|copying|copyright|notice|authors|readme|^ftl\.txt$", path.name, re.I)
+                or "LICENSES" in path.parts):
+            target = DEST / component / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(tar.extractfile(member).read())
+            count += 1
+    return count
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cache", type=Path, required=True)
+    parser.add_argument("--ffmpeg-source", type=Path, required=True)
+    args = parser.parse_args()
+    DEST.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(args.ffmpeg_source, "r|*") as tar:
+        print("FFmpeg notices:", collect(tar, "ffmpeg"), flush=True)
+    with tarfile.open(args.cache, "r|*") as cache:
+        for member in cache:
+            if not member.isfile(): continue
+            component = Path(member.name).name.split("_", 1)[0]
+            with tarfile.open(fileobj=cache.extractfile(member), mode="r|*") as tar:
+                print(component, collect(tar, component), flush=True)
+    (DEST / "README.txt").write_text("License and notice files extracted from the verified source material for\nBtbN's GPL FFmpeg build. The source cache covers all upstream build targets,\nso this notice collection also includes components not used on Windows.\nThe exact FFmpeg revision, build configuration, dependency sources, patches\nand build recipes are identified by Omacut's Windows source manifest.\nOmacut remains MIT licensed; the separate FFmpeg executable is GPLv3.\n")
+    with zipfile.ZipFile(ROOT / "dist/FFmpeg-BtbN-20261023-notices.zip", "w", zipfile.ZIP_DEFLATED) as z:
+        for file in sorted(DEST.rglob("*")):
+            if file.is_file(): z.write(file, file.relative_to(DEST))
+    print("FFmpeg and dependency notices collected", flush=True)

@@ -1,0 +1,23 @@
+{
+  "qt_version": "6.10.2",
+  "source_manifest": {
+    "url": "https://github.com/geekhunger/omacut/releases/download/omacut-dependencies-windows-2026-10-24/Windows-Dependency-Sources.json",
+    "sha256": "d7bf2b851174a56e7ed3440480107af3f3c5a3d2f56457ca27c5f75b736bac00"
+  },
+  "notices": [
+    {
+      "file": "Qt-6.10.2-windows-notices.zip",
+      "url": "https://github.com/geekhunger/omacut/releases/download/omacut-dependencies-windows-2026-10-24/Qt-6.10.2-windows-notices.zip",
+      "bytes": 1210120,
+      "sha256": "f040255299fc0b01a015d8ca5f796dd03c6779338731fb3eca34ae405760f496",
+      "directory": "qt"
+    },
+    {
+      "file": "FFmpeg-BtbN-20261023-notices.zip",
+      "url": "https://github.com/geekhunger/omacut/releases/download/omacut-dependencies-windows-2026-10-24/FFmpeg-BtbN-20261023-notices.zip",
+      "bytes": 5328763,
+      "sha256": "1299f9e10520d198a9a3a0dfbff054694bc112d6d07907676063ec91a19078fa",
+      "directory": "ffmpeg-dependencies"
+    }
+  ]
+}

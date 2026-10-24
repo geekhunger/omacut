@@ -90,6 +90,11 @@ def dependency(old):
 
 
 def bundle():
+    qt_version = output("qmake", "-query", "QT_VERSION").strip()
+    for module in ("qtbase", "qtdeclarative", "qtmultimedia", "qtsvg", "qtquicktimeline"):
+        prefix = Path(output(BREW_COMMAND, "--prefix", module).strip()).resolve()
+        if prefix.name.split("_")[0] != qt_version:
+            raise RuntimeError(f"Mixed Qt versions: qmake {qt_version}, {module} {prefix.name}; upgrade the Qt modules together")
     if "--resume" not in sys.argv:
         run(ROOT / "bin/build", cwd=ROOT)
         DIST.mkdir(exist_ok=True)
@@ -100,9 +105,39 @@ def bundle():
         helpers.mkdir(exist_ok=True)
         for tool in ("ffmpeg", "ffprobe"):
             shutil.copy2((BREW / "bin" / tool).resolve(), helpers / tool)
-        run("macdeployqt", APP, "-qmldir=" + str(ROOT / "src"), "-always-overwrite", "-no-codesign",
+        # These QML add-on frameworks do not carry the same rpaths as the
+        # essential modules in Homebrew's split installation. Seed their
+        # destinations before macdeployqt traverses the imported style plugins.
+        FRAMEWORKS.mkdir(exist_ok=True)
+        for module, frameworks in {
+            "qtquicktimeline": ("QtQuickTimeline", "QtQuickTimelineBlendTrees"),
+            "qtsvg": ("QtSvg",),
+        }.items():
+            for framework in frameworks:
+                source = BREW / "opt" / module / "lib" / (framework + ".framework") / framework
+                if source.exists(): dependency(str(source))
+        run("macdeployqt", APP, "-qmldir=" + str(ROOT / "src"), "-always-overwrite", "-no-codesign", "-no-plugins",
             "-libpath=" + str(BREW / "opt/qtquicktimeline/lib"),
             "-libpath=" + str(BREW / "opt/qtsvg/lib"))
+        # Homebrew runners may have unrelated Qt modules installed. Deploy the
+        # app's platform/media/image plugins explicitly so optional SDK-wide
+        # plugins cannot drag PDF/3D/VirtualKeyboard and stale Qt versions in.
+        plugins = Path(output("qmake", "-query", "QT_INSTALL_PLUGINS").strip())
+        selected = {
+            "platforms": ["libqcocoa.dylib"],
+            "multimedia": ["libdarwinmediaplugin.dylib", "libffmpegmediaplugin.dylib"],
+            "imageformats": ["libqjpeg.dylib", "libqgif.dylib", "libqsvg.dylib"],
+            "iconengines": ["libqsvgicon.dylib"],
+            "styles": ["libqmacstyle.dylib"],
+        }
+        for category, names in selected.items():
+            target = APP / "Contents/PlugIns" / category
+            target.mkdir(parents=True, exist_ok=True)
+            for name in names:
+                source = plugins / category / name
+                if source.exists(): shutil.copy2(source.resolve(), target / name)
+        if not (APP / "Contents/PlugIns/platforms/libqcocoa.dylib").exists():
+            raise RuntimeError("Cocoa platform plugin was not deployed")
     elif not APP.exists():
         raise RuntimeError("--resume requires an existing staged app")
     for tool in ("ffmpeg", "ffprobe"):
