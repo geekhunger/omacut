@@ -59,6 +59,12 @@ def windows(build):
     for directory in ("doc", "licenses"):
         if (ffmpeg / directory).exists():
             shutil.copytree(ffmpeg / directory, licenses / ("ffmpeg-" + directory), dirs_exist_ok=True)
+    shutil.copy2(ffmpeg / "LICENSE.txt", licenses / "FFmpeg-GPL-3.0.txt")
+    # Diagnostic smoke tests run in session 0 / without a desktop as well.
+    # Deploy the matching offscreen plugin explicitly, alongside qwindows.
+    offscreen = qt / "plugins/platforms/qoffscreen.dll"
+    if offscreen.exists():
+        shutil.copy2(offscreen, stage / "platforms/qoffscreen.dll")
     if (qt / "Licenses").exists():
         shutil.copytree(qt / "Licenses", licenses / "qt", dirs_exist_ok=True)
     (stage / "qt.conf").write_text("[Paths]\nPrefix=.\nPlugins=.\nQmlImports=qml\n")

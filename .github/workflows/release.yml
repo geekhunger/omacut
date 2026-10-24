@@ -5,15 +5,25 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      promote_run:
+        description: 'Optional successful build run ID to publish without rebuilding'
+        type: string
+        default: ''
+      release_tag:
+        description: 'Required when promoting a tested run, for example v0.7.4'
+        type: string
+        default: ''
   release:
     types: [published]
 permissions:
   contents: read
 concurrency:
-  group: build-${{ github.workflow }}-${{ github.ref }}
+  group: release-build-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') && github.event_name != 'release' }}
 jobs:
   build:
+    if: inputs.promote_run == ''
     name: ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -155,27 +165,69 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: failed-${{ matrix.name }}
-          path: validation/
+          path: |
+            validation/
+            release-assets/
           if-no-files-found: ignore
   publish:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
+    if: always() && (inputs.promote_run != '' || (needs.build.result == 'success' && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release')))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Verify the tested source and all four candidates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CANDIDATE_RUN: ${{ inputs.promote_run || github.run_id }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name || github.ref_name }}
+          PROMOTING: ${{ inputs.promote_run != '' }}
+        shell: python
+        run: |
+          import json, os, re, subprocess
+          def gh(*args):
+              return json.loads(subprocess.check_output(['gh', *args], text=True))
+          repo, run_id, tag = os.environ['GH_REPO'], os.environ['CANDIDATE_RUN'], os.environ['RELEASE_TAG']
+          assert re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?', tag), 'Invalid release tag'
+          run = gh('api', f'repos/{repo}/actions/runs/{run_id}')
+          assert run['head_repository']['full_name'] == repo and run['event'] != 'pull_request', 'Untrusted candidate source'
+          if os.environ['PROMOTING'] == 'true':
+              assert run['conclusion'] == 'success', 'Candidate run must have succeeded'
+          else:
+              assert run['id'] == int(os.environ['GITHUB_RUN_ID']), 'Unexpected build run'
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert run['head_sha'] == source, 'Workflow ref and candidate source must match'
+          artifacts = gh('api', f'repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
+          names = {a['name'] for a in artifacts if not a['expired']}
+          assert {'candidate-macos-arm64','candidate-windows-x64','candidate-linux-amd64','candidate-linux-arm64'} <= names, 'Missing platform candidate'
+          old = subprocess.run(['git','rev-parse',f'refs/tags/{tag}^{{commit}}'], text=True, capture_output=True)
+          assert old.returncode != 0 or old.stdout.strip() == source, 'Existing tag points at different source'
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write(f'RELEASE_COMMIT={source}\n')
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: candidate-*
           path: candidates
+          run-id: ${{ inputs.promote_run || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify asset checksums before publication
+        run: |
+          for sums in candidates/*/release-assets/SHA256SUMS-*.txt; do
+            (cd "$(dirname "$sums")" && sha256sum -c "$(basename "$sums")")
+          done
       - name: Publish all tested binaries without deleting existing assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name || github.ref_name }}
         shell: bash
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --title "Omacut $RELEASE_TAG" --generate-notes
+            gh release create "$RELEASE_TAG" --target "$RELEASE_COMMIT" --title "Omacut $RELEASE_TAG" --generate-notes
           fi
           find candidates -type f -path '*/release-assets/*' -print0 | xargs -0 gh release upload "$RELEASE_TAG" --clobber

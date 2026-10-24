@@ -51,10 +51,18 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
         qInfo().noquote() << json;
         QCoreApplication::exit(error.isEmpty() && saved ? 0 : 1);
     };
-    auto beginExport = [s, &backend, finish] {
+    auto beginExport = [s, &backend, &engine, finish] {
         if (!s->loaded || !s->preview || s->exporting || s->finished) return;
         s->exporting = true;
         qInfo("Smoke: trimming, splitting, moving and exporting");
+        // The editor pauses before changing clip edges. Do the same here;
+        // seeking a running GStreamer pipeline during a structural edit can
+        // otherwise race its old stream position.
+        if (auto *player = engine.rootObjects().first()->findChild<QMediaPlayer *>("player")) {
+            player->pause();
+            QMetaObject::invokeMethod(player, "finishPriming");
+            player->setProperty("pendingPlay", false);
+        }
         auto *timeline = backend.timeline();
         const double duration = timeline->duration();
         if (duration < 0.8) { finish("Input must be at least 0.8 seconds long"); return; }
@@ -89,7 +97,9 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
         s->result.insert("outputHeight", info.height);
         s->result.insert("outputAudio", info.audio);
         s->result.insert("outputFrameDecoded", !frame.isNull());
-        finish(info.ok && !frame.isNull() && std::abs(info.duration - s->expectedDuration) < 0.15
+        const auto input = ffmpeg::probe(s->input);
+        finish(info.ok && info.audio == input.audio && !frame.isNull()
+                   && std::abs(info.duration - s->expectedDuration) < 0.15
                ? QString() : QStringLiteral("Export verification failed: ") + info.error);
     });
     auto *player = engine.rootObjects().isEmpty() ? nullptr
