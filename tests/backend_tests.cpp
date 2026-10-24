@@ -1507,6 +1507,9 @@ void BackendTests::qmlKeysSplitAndRemoveClips() {
     QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
                               (edit::Clips{{0, 0.0, 5.0}, {0, 5.0, 10.0}, {0, 10.0, 20.0}}), 3000);
+    QTest::keyClick(window, Qt::Key_Y, Qt::ControlModifier);
+    QCOMPARE(backend.timeline.clips(),
+             (edit::Clips{{0, 0.0, 5.0}, {0, 5.0, 10.0}, {0, 10.0, 20.0}}));
     QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
     QTRY_COMPARE_WITH_TIMEOUT(backend.timeline.clips(),
                               (edit::Clips{{0, 0.0, 5.0}, {0, 10.0, 20.0}}), 3000);
@@ -2144,6 +2147,11 @@ void BackendTests::qmlShortcutAlternativesCanBeAddedAndAllRemoved() {
     QTest::keyClick(window, Qt::Key_Question);
     for (int i = 0; i < 4; ++i)
         QVERIFY(findShortcutItem(window->contentItem(), QStringLiteral("shortcutBinding_earlier_%1").arg(i)));
+    for (int i = 1; i < 4; ++i) {
+        auto *previous = findShortcutItem(window->contentItem(), QStringLiteral("shortcutBinding_earlier_%1").arg(i - 1));
+        auto *current = findShortcutItem(window->contentItem(), QStringLiteral("shortcutBinding_earlier_%1").arg(i));
+        QVERIFY(current->mapToScene(QPointF()).y() >= previous->mapToScene(QPointF()).y() + previous->height());
+    }
     for (int i = 0; i < 3; ++i)
         QVERIFY(findShortcutItem(window->contentItem(), QStringLiteral("shortcutBinding_remove_%1").arg(i)));
     QVERIFY(clickShortcutControl(window, QStringLiteral("shortcutAdd_earlier")));

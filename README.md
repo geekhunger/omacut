@@ -97,7 +97,7 @@ These bindings are included in the
 - `[`: Move the current clip's start (in marker) to the playhead, then place the playhead at the new clip start.
 - `]`: Move the current clip's end (out marker) to the playhead, then place the playhead at the new clip end.
 - `Cmd+Z`: Undo.
-- `Cmd+Shift+Z` or `Cmd+Y`: Redo.
+- `Cmd+Shift+Z`: Redo.
 - `Z`: Zoom into the clip at the playhead; press again to show the whole edit immediately. The view follows the playhead and adapts to edits so the shortest clip spans at least 10% of the visible timeline.
 - `F`: Save the frame under the playhead as a PNG next to its video.
 - `Cmd+O`: Open a new video; ask first if the current edit has unexported changes.
@@ -115,7 +115,7 @@ with `Option+5` and `]` with `Option+6`.
 
 ## Customize shortcuts
 
-Open the shortcut panel with `?` or the **?** button. Every configured shortcut is shown, including all alternatives. The listed bindings above are the defaults.
+Open the shortcut panel with `?` or the **?** button. Every configured shortcut is shown on its own line, including all alternatives. The listed bindings above are the defaults.
 
 - Click a **yellow shortcut** to replace that one binding. An empty field appears; press the new key or key combination to save it.
 - Click the **+** beside an action to record another shortcut. Existing alternatives stay assigned.
@@ -192,8 +192,8 @@ customizations. They are included in the
 - **Clip movement:** Replaced `Alt+[` / `Alt+]` with minus/dash characters and `+`. Moving preserves the selected clip, its preview frame and its in/out-edge association, including repeated moves and reversing direction at the sequence boundaries.
 - **Clip trimming:** `[` moves the in marker to the playhead and then seeks to the new clip start; `]` moves the out marker and seeks to the new clip end. The edited clip keeps its preview/edge association. Both bindings also work when typed with Option on a German Mac keyboard.
 - **Keyboard-layout handling:** Added character-based editing shortcuts for `+`, `-`, `−`, `–`, `—`, `[` and `]`, numeric-keypad keys and macOS Option-generated characters. Physical key codes no longer override the character actually typed; Cmd shortcuts remain separate.
-- **Editable shortcuts:** Added recording of single keys/combinations, multiple editable alternatives per action, individual removal, persistent settings, conflict feedback and a defaults reset. Clicking outside the active recording field cancels capture and preserves the previous bindings. The scrollable shortcut panel stays open on outside clicks, has an explicit X close button and uses a pill-shaped scrollbar and background track.
-- **Keyboard controls and help:** Removed the modifier-plus-Space trim bindings and switched Mac help/documentation to `Cmd`. Made `0` a dedicated jump-to-start shortcut, retained `1`–`9` for 10%–90% jumps, and updated the in-app help for the revised navigation and movement keys.
+- **Editable shortcuts:** Added recording of single keys/combinations, multiple editable alternatives per action on separate lines, individual removal, persistent settings, conflict feedback and a defaults reset. Clicking outside the active recording field cancels capture and preserves the previous bindings. The scrollable shortcut panel stays open on outside clicks, has an explicit X close button and uses a pill-shaped scrollbar and background track.
+- **Keyboard controls and help:** Removed the modifier-plus-Space trim bindings and switched Mac help/documentation to `Cmd`. Default redo is `Cmd+Shift+Z` only, while undo is `Cmd+Z`; existing user-defined bindings are preserved. Made `0` a dedicated jump-to-start shortcut, retained `1`–`9` for 10%–90% jumps, and updated the in-app help for the revised navigation and movement keys.
 - **Zoom toggle:** Changed `Z` so a second press always returns immediately to the whole edit, including after trimming or moving to a different clip.
 - **Zoom that follows editing:** Added automatic panning with the playhead during seeking, playback and clip-edge navigation. The zoom adapts when clip lengths change so the shortest clip spans at least 10% of the visible timeline, while preserving stable coordinates during handle/clip drags.
 - **Faster clip dragging:** Reduced the hold delay before picking up a clip from 350 ms to 220 ms.

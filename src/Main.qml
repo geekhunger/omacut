@@ -457,8 +457,7 @@ ApplicationWindow {
                 "id": "redo",
                 "label": "Redo",
                 "keys": [
-                        "Ctrl+Shift+Z",
-                        "Ctrl+Y"
+                        "Ctrl+Shift+Z"
                 ],
                 "scope": "edit"
         },
@@ -1281,62 +1280,79 @@ ApplicationWindow {
                                 required property var modelData
                                 width: helpColumn.width
                                 height: Math.max(bindingFlow.implicitHeight, actionLabel.implicitHeight, 36)
-                                Flow {
+                                Item {
                                     id: bindingFlow
                                     width: Math.min(230, shortcutRow.width * 0.46)
-                                    spacing: 4
-                                    Repeater {
-                                        model: win.shortcutSequences(shortcutRow.modelData.id)
-                                        delegate: Rectangle {
-                                            id: bindingCell
-                                            required property string modelData
-                                            required property int index
-                                            readonly property bool recording: win.recordingShortcut === shortcutRow.modelData.id
-                                                && win.recordingShortcutIndex === index
-                                            onRecordingChanged: if (recording) Qt.callLater(() => win.ensureShortcutVisible(bindingCell))
-                                            objectName: "shortcutBinding_" + shortcutRow.modelData.id + "_" + index
-                                            width: recording ? 90 : bindingLabel.implicitWidth + 40
-                                            height: 32
-                                            radius: 5
-                                            color: recording ? "#2c2c2f" : "transparent"
-                                            border.width: recording ? 1 : 0
-                                            border.color: win.accent
-                                            Accessible.role: Accessible.Button
-                                            Accessible.name: "Change " + shortcutRow.modelData.label + " shortcut " + win.shortcutDisplay(modelData)
-                                            Label {
-                                                id: bindingLabel
-                                                objectName: "shortcutText_" + shortcutRow.modelData.id + "_" + bindingCell.index
-                                                anchors.centerIn: parent
-                                                anchors.horizontalCenterOffset: -10
-                                                text: bindingCell.recording ? "" : win.shortcutDisplay(bindingCell.modelData)
-                                                color: win.accent
-                                                font.pixelSize: 13
-                                            }
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: win.beginShortcutCapture(shortcutRow.modelData.id, bindingCell.index, bindingCell)
-                                            }
-                                            Rectangle {
-                                                objectName: "shortcutRemove_" + shortcutRow.modelData.id + "_" + bindingCell.index
-                                                anchors.right: parent.right
-                                                anchors.rightMargin: 3
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: 22; height: 24; radius: 4
-                                                color: "#2c2c2f"
+                                    implicitHeight: Math.max(bindingColumn.implicitHeight, 32)
+                                    Column {
+                                        id: bindingColumn
+                                        width: implicitWidth
+                                        spacing: 4
+                                        Repeater {
+                                            model: win.shortcutSequences(shortcutRow.modelData.id)
+                                            delegate: Rectangle {
+                                                id: bindingCell
+                                                required property string modelData
+                                                required property int index
+                                                readonly property bool recording: win.recordingShortcut === shortcutRow.modelData.id
+                                                    && win.recordingShortcutIndex === index
+                                                onRecordingChanged: if (recording) Qt.callLater(() => win.ensureShortcutVisible(bindingCell))
+                                                objectName: "shortcutBinding_" + shortcutRow.modelData.id + "_" + index
+                                                width: Math.min(bindingFlow.width - 34, recording ? 90 : bindingLabel.implicitWidth + 40)
+                                                height: Math.max(32, bindingLabel.implicitHeight + 12)
+                                                radius: 5
+                                                color: recording ? "#2c2c2f" : "transparent"
+                                                border.width: recording ? 1 : 0
+                                                border.color: win.accent
                                                 Accessible.role: Accessible.Button
-                                                Accessible.name: "Remove " + win.shortcutDisplay(bindingCell.modelData) + " shortcut for " + shortcutRow.modelData.label
-                                                Label { anchors.centerIn: parent; text: "−"; color: win.accent; font.pixelSize: 18 }
+                                                Accessible.name: "Change " + shortcutRow.modelData.label + " shortcut " + win.shortcutDisplay(modelData)
+                                                Label {
+                                                    id: bindingLabel
+                                                    objectName: "shortcutText_" + shortcutRow.modelData.id + "_" + bindingCell.index
+                                                    anchors.centerIn: parent
+                                                    anchors.horizontalCenterOffset: -10
+                                                    text: bindingCell.recording ? "" : win.shortcutDisplay(bindingCell.modelData)
+                                                    color: win.accent
+                                                    font.pixelSize: 13
+                                                    width: parent.width - 40
+                                                    wrapMode: Text.WrapAnywhere
+                                                }
                                                 MouseArea {
                                                     anchors.fill: parent
                                                     cursorShape: Qt.PointingHandCursor
-                                                    onClicked: win.removeShortcut(shortcutRow.modelData.id, bindingCell.index)
+                                                    onClicked: win.beginShortcutCapture(shortcutRow.modelData.id, bindingCell.index, bindingCell)
+                                                }
+                                                Rectangle {
+                                                    objectName: "shortcutRemove_" + shortcutRow.modelData.id + "_" + bindingCell.index
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 3
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 22; height: 24; radius: 4
+                                                    color: "#2c2c2f"
+                                                    Accessible.role: Accessible.Button
+                                                    Accessible.name: "Remove " + win.shortcutDisplay(bindingCell.modelData) + " shortcut for " + shortcutRow.modelData.label
+                                                    Label { anchors.centerIn: parent; text: "−"; color: win.accent; font.pixelSize: 18 }
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: win.removeShortcut(shortcutRow.modelData.id, bindingCell.index)
+                                                    }
                                                 }
                                             }
+                                        }
+                                        Rectangle {
+                                            id: newBindingField
+                                            objectName: "shortcutNew_" + shortcutRow.modelData.id
+                                            visible: win.recordingShortcut === shortcutRow.modelData.id && win.recordingShortcutIndex < 0
+                                            onVisibleChanged: if (visible) Qt.callLater(() => win.ensureShortcutVisible(newBindingField))
+                                            width: 90; height: visible ? 32 : 0; radius: 5
+                                            color: "#2c2c2f"; border.width: 1; border.color: win.accent
+                                            MouseArea { anchors.fill: parent }
                                         }
                                     }
                                     Rectangle {
                                         objectName: "shortcutAdd_" + shortcutRow.modelData.id
+                                        x: bindingColumn.width + 4
                                         width: 28; height: 32; radius: 5
                                         color: "#2c2c2f"
                                         Accessible.role: Accessible.Button
@@ -1348,22 +1364,14 @@ ApplicationWindow {
                                             onClicked: win.beginShortcutCapture(shortcutRow.modelData.id, -1, newBindingField)
                                         }
                                     }
-                                    Rectangle {
-                                        id: newBindingField
-                                        objectName: "shortcutNew_" + shortcutRow.modelData.id
-                                        visible: win.recordingShortcut === shortcutRow.modelData.id && win.recordingShortcutIndex < 0
-                                        onVisibleChanged: if (visible) Qt.callLater(() => win.ensureShortcutVisible(newBindingField))
-                                        width: 90; height: visible ? 32 : 0; radius: 5
-                                        color: "#2c2c2f"; border.width: 1; border.color: win.accent
-                                        MouseArea { anchors.fill: parent }
-                                    }
                                 }
                                 Label {
                                     id: actionLabel
                                     objectName: "shortcutAction_" + shortcutRow.modelData.id
                                     anchors.left: bindingFlow.right
                                     anchors.leftMargin: 16
-                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 8
                                     width: parent.width - bindingFlow.width - 16
                                     text: shortcutRow.modelData.label
                                     color: "#d6d6da"
