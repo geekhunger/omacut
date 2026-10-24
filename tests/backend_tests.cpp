@@ -1250,7 +1250,8 @@ void BackendTests::exportStartFailureClearsBusy() {
     backend.exportClips(QUrl::fromLocalFile(m_dir.filePath(QStringLiteral("failed.mp4"))),
                         wholeVideo(1.0));
 
-    QVERIFY(backend.busy());
+    // Windows can report CreateProcess failure synchronously from start().
+    QVERIFY(backend.busy() || failedSpy.count() == 1);
     QTRY_COMPARE_WITH_TIMEOUT(failedSpy.count(), 1, 5000);
     QVERIFY(!backend.busy());
     QVERIFY(backend.status().isEmpty());

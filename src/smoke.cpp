@@ -95,6 +95,10 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
     auto *player = engine.rootObjects().isEmpty() ? nullptr
         : engine.rootObjects().first()->findChild<QMediaPlayer *>("player");
     if (player && player->videoSink()) {
+        QTimer::singleShot(5000, &engine, [player] {
+            qInfo() << "Smoke: player state" << player->source() << player->mediaStatus()
+                    << player->playbackState() << player->position() << player->errorString();
+        });
         QObject::connect(player->videoSink(), &QVideoSink::videoFrameChanged, &engine,
                          [s, beginExport](const QVideoFrame &frame) {
             if (!frame.isValid() || s->preview) return;
@@ -106,7 +110,16 @@ void startSmokeTest(Backend &backend, QQmlApplicationEngine &engine, const QStri
         QObject::connect(player, &QMediaPlayer::errorOccurred, &engine,
                          [finish](QMediaPlayer::Error, const QString &error) { finish(error); });
     }
-    QTimer::singleShot(120000, &engine, [finish] { finish("Smoke test timed out (probe/preview/export)"); });
+    QTimer::singleShot(120000, &engine, [s, player, finish] {
+        if (player) {
+            s->result.insert("playerSource", player->source().toString());
+            s->result.insert("mediaStatus", int(player->mediaStatus()));
+            s->result.insert("playbackState", int(player->playbackState()));
+            s->result.insert("playerPosition", double(player->position()));
+            s->result.insert("playerError", player->errorString());
+        }
+        finish("Smoke test timed out (probe/preview/export)");
+    });
     QTimer::singleShot(0, &engine, [s, &backend, player, finish] {
         if (s->report.isEmpty() || s->input.isEmpty() || s->output.isEmpty()
             || s->input == s->output || !player || !player->videoSink()) {
