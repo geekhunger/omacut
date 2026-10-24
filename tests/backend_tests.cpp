@@ -1353,7 +1353,9 @@ void BackendTests::qmlShortcutsTriggerBackendActions() {
 // Brings Main.qml up against the stub backend, loaded and focused, ready for keys.
 static QQuickWindow *showEditor(QmlHarness &harness, ShortcutBackend &backend) {
     QQuickWindow *window = harness.window();
-    if (!window || !QTest::qWaitFor([window] { return window->property("audioOutputReady").toBool(); }, 3000))
+    if (!window || !QTest::qWaitFor([window] {
+            return window->property("audioOutputReady").toBool() == !QMediaDevices::audioOutputs().isEmpty();
+        }, 3000))
         return nullptr;
     backend.announceInfo();
     window->show();

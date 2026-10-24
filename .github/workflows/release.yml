@@ -19,7 +19,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: release-build-${{ github.ref }}
+  group: release-build-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') && github.event_name != 'release' }}
 jobs:
   build:
@@ -93,19 +93,19 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p validation/bin validation/src
-          QT_QPA_PLATFORM=offscreen ./build/backend_tests -o validation/tests.txt,txt -o validation/tests.xml,junitxml
           cp build/backend_tests validation/bin/
           cp src/*.qml src/*.js validation/src/
+          QT_QPA_PLATFORM=offscreen ./build/backend_tests -o validation/tests.txt,txt -o validation/tests.xml,junitxml
       - name: Test Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force validation/bin, validation/src
+          Copy-Item build/Release/backend_tests.exe validation/bin/
+          Copy-Item src/*.qml, src/*.js validation/src/
           $env:QT_QPA_PLATFORM = 'offscreen'
           & build/Release/backend_tests.exe -o validation/tests.txt,txt -o validation/tests.xml,junitxml
           if ($LASTEXITCODE -ne 0) { throw "Tests failed: $LASTEXITCODE" }
-          Copy-Item build/Release/backend_tests.exe validation/bin/
-          Copy-Item src/*.qml, src/*.js validation/src/
       - name: Build and test macOS
         if: runner.os == 'macOS'
         run: |
