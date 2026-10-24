@@ -67,6 +67,8 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("backend", &backend);
     engine.rootContext()->setContextProperty("shortcutStore", &shortcutStore);
 
+    if (smoke && args.contains(QStringLiteral("--smoke-hidden")))
+        engine.setInitialProperties({{QStringLiteral("visible"), false}});
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return -1;

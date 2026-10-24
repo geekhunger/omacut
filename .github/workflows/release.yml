@@ -11,7 +11,7 @@ permissions:
   contents: read
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') && github.event_name != 'release' }}
 jobs:
   build:
     name: ${{ matrix.name }}
@@ -122,7 +122,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           EXE=$(cat dist/packaged-executable.txt)
-          QT_QPA_PLATFORM=offscreen "$EXE" --smoke-test --smoke-input "$PWD/validation/input.mp4" --smoke-output "$PWD/validation/export.mp4" --smoke-report "$PWD/validation/smoke.json"
+          QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM=1 "$EXE" --smoke-test --smoke-hidden --smoke-input "$PWD/validation/input.mp4" --smoke-output "$PWD/validation/export.mp4" --smoke-report "$PWD/validation/smoke.json"
       - name: Smoke test packaged Windows app
         if: runner.os == 'Windows'
         shell: pwsh
