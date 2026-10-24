@@ -50,8 +50,16 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ dpkg-dev qt6-base-dev qt6-declarative-dev qt6-multimedia-dev dbus-x11 xvfb $(cat packaging/linux-runtime-dependencies.txt)
+          sudo apt-get install -y cmake ninja-build g++ dpkg-dev qt6-base-dev qt6-declarative-dev qt6-multimedia-dev dbus-x11 xvfb pulseaudio $(cat packaging/linux-runtime-dependencies.txt)
           echo /usr/lib/qt6/bin >> "$GITHUB_PATH"
+      - name: Provide an isolated CI audio output
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p validation
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=omacut_ci
+          pactl set-default-sink omacut_ci
+          pactl list sinks short > validation/audio-sinks.txt
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
@@ -131,7 +139,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           EXE=$(cat dist/packaged-executable.txt)
-          dbus-run-session -- xvfb-run -a "$EXE" --smoke-test --smoke-input "$PWD/validation/input.mp4" --smoke-output "$PWD/validation/export.mp4" --smoke-report "$PWD/validation/smoke.json"
+          GST_DEBUG=2 dbus-run-session -- xvfb-run -a "$EXE" --smoke-test --smoke-input "$PWD/validation/input.mp4" --smoke-output "$PWD/validation/export.mp4" --smoke-report "$PWD/validation/smoke.json" 2> >(tee validation/gstreamer.log >&2)
       - name: Smoke test packaged macOS app
         if: runner.os == 'macOS'
         run: |

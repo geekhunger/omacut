@@ -21,13 +21,20 @@ BREW = Path("/opt/homebrew" if Path("/opt/homebrew/bin/brew").exists() else "/us
 
 
 def fetch(url, path, checksum=None):
+    original_url = url
+    if url.startswith("https://ftpmirror.gnu.org/"):
+        # A redirected volunteer mirror can have an expired certificate.
+        # GNU's canonical HTTPS server carries the same checksum-pinned file.
+        url = "https://ftp.gnu.org/gnu/" + url.removeprefix("https://ftpmirror.gnu.org/")
     if not path.exists():
         subprocess.run(["curl", "--fail", "--location", "--retry", "3", "--connect-timeout", "20", "--max-time", "600", "--silent", "--show-error", url, "-o", str(path)], check=True)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     if checksum and digest != checksum:
         path.unlink()
         raise RuntimeError("Source checksum mismatch: " + url)
-    return {"url": url, "file": str(path.relative_to(DEST)), "sha256": digest}
+    record = {"url": url, "file": str(path.relative_to(DEST)), "sha256": digest}
+    if original_url != url: record["formula_url"] = original_url
+    return record
 
 
 def installed_formula_revision(name, prefix, formula, info):
